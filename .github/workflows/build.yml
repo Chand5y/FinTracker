@@ -13,8 +13,14 @@ jobs:
         with:
           flutter-version: '3.19.0'
           channel: 'stable'
+      
+      # Generates the missing 'android/' folder and Gradle files on the server
+      - name: Generate Android configuration files
+        run: flutter create .
+        
       - run: flutter pub get
       - run: flutter build apk --release
+      
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
