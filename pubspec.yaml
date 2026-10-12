@@ -1,0 +1,30 @@
+name: fintracker
+description: A clean, aesthetic expense tracker.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.3 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # UI & Theming
+  glassmorphism: ^3.0.0
+  google_fonts: ^6.1.0
+  dynamic_color: ^1.6.9 # For Material Expressive Theme
+  # Database & State
+  sqflite: ^2.3.0
+  path_provider: ^2.1.2
+  shared_preferences: ^2.2.2
+  provider: ^6.1.1
+  # Media & PDF
+  image_picker: ^1.0.7
+  pdf: ^3.10.7
+  printing: ^5.11.1
+  # Backup
+  google_sign_in: ^6.2.1
+  googleapis: ^11.1.0
+
+flutter:
+  uses-material-design: true
