@@ -14,9 +14,9 @@ jobs:
           flutter-version: '3.19.0'
           channel: 'stable'
       
-      # Generates the missing 'android/' folder and Gradle files on the server
+      # Forces the lowercase project name and assigns your custom Android package ID
       - name: Generate Android configuration files
-        run: flutter create .
+        run: flutter create --project-name fintracker --org com.chandankumar .
         
       - run: flutter pub get
       - run: flutter build apk --release
