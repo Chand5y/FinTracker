@@ -5,6 +5,8 @@ import '../data/database_helper.dart';
 import '../data/transaction_model.dart';
 import '../theme/theme_provider.dart';
 import '../core/constants.dart';
+import 'add_transaction_screen.dart';
+
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -149,10 +151,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         foregroundColor: isDark ? Colors.black : Colors.white,
         elevation: 4,
         onPressed: () async {
-          // Navigation to Add Transaction Screen will go here
-          // await Navigator.push(context, MaterialPageRoute(builder: (_) => const AddTransactionScreen()));
-          // _refreshTransactions();
-        },
+  await Navigator.push(context, MaterialPageRoute(builder: (_) => const AddTransactionScreen()));
+  _refreshTransactions();
+},
+        
         child: const Icon(Icons.add),
       ),
     );
