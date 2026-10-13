@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'book_model.dart';
 import 'transaction_model.dart';
 
 class DatabaseHelper {
@@ -10,7 +11,7 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('fintracker.db');
+    _database = await _initDB('fintracker_v3.db');
     return _database!;
   }
 
@@ -18,7 +19,6 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    // Opening the database, creating it if it doesn't exist
     return await openDatabase(
       path,
       version: 1,
@@ -27,49 +27,69 @@ class DatabaseHelper {
   }
 
   Future _createDB(Database db, int version) async {
-    const idType = 'INTEGER PRIMARY KEY AUTOINCREMENT';
-    const textType = 'TEXT';
-    const realType = 'REAL';
+    // Enable foreign keys for SQLite
+    await db.execute('PRAGMA foreign_keys = ON');
+
+    await db.execute('''
+    CREATE TABLE books (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    )
+    ''');
 
     await db.execute('''
     CREATE TABLE transactions (
-      id $idType,
-      type $textType,
-      amount $realType,
-      partyName $textType,
-      category $textType,
-      notes $textType,
-      imagePath $textType,
-      date $textType,
-      currency $textType
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      bookId INTEGER NOT NULL,
+      type TEXT,
+      amount REAL,
+      name TEXT,
+      category TEXT,
+      notes TEXT,
+      imagePath TEXT,
+      date TEXT,
+      currency TEXT,
+      paymentMode TEXT,
+      FOREIGN KEY (bookId) REFERENCES books (id) ON DELETE CASCADE
     )
+    ''');
+    
+    // Create a default book so the app isn't empty on first launch
+    await db.insert('books', {'name': 'Personal Expenses', 'updatedAt': DateTime.now().toIso8601String()});
+  }
+
+  // --- BOOK METHODS ---
+  Future<int> insertBook(BookModel book) async {
+    final db = await instance.database;
+    return await db.insert('books', book.toMap());
+  }
+
+  // Gets all books and calculates their Net Balance, Total In, and Total Out instantly
+  Future<List<Map<String, dynamic>>> getBooksWithBalances() async {
+    final db = await instance.database;
+    return await db.rawQuery('''
+      SELECT b.id, b.name, b.updatedAt,
+             COALESCE(SUM(CASE WHEN t.type = 'Income' THEN t.amount ELSE 0 END), 0) as totalIn,
+             COALESCE(SUM(CASE WHEN t.type = 'Expense' THEN t.amount ELSE 0 END), 0) as totalOut
+      FROM books b
+      LEFT JOIN transactions t ON b.id = t.bookId
+      GROUP BY b.id
+      ORDER BY b.updatedAt DESC
     ''');
   }
 
+  // --- TRANSACTION METHODS ---
   Future<int> insertTransaction(TransactionModel transaction) async {
     final db = await instance.database;
+    // Update the book's 'updatedAt' timestamp when a transaction is added
+    await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
     return await db.insert('transactions', transaction.toMap());
   }
 
-  Future<List<TransactionModel>> readAllTransactions() async {
+  Future<List<TransactionModel>> readTransactionsForBook(int bookId) async {
     final db = await instance.database;
-    const orderBy = 'date DESC';
-    final result = await db.query('transactions', orderBy: orderBy);
+    final result = await db.query('transactions', where: 'bookId = ?', whereArgs: [bookId], orderBy: 'date DESC');
     return result.map((json) => TransactionModel.fromMap(json)).toList();
-  }
-
-  Future<int> deleteTransaction(int id) async {
-    final db = await instance.database;
-    return await db.delete(
-      'transactions',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  }
-
-  // Used later for the Google Drive Sync Feature
-  Future<String> getDatabasePathString() async {
-    final dbPath = await getDatabasesPath();
-    return join(dbPath, 'fintracker.db');
   }
 }
