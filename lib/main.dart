@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:dynamic_color/dynamic_color.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'theme/theme_provider.dart';
 import 'screens/books_screen.dart';
+import 'core/constants.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,42 +23,40 @@ class FintrackApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // We listen to the theme provider here so the whole app rebuilds when toggled
     return Consumer<ThemeProvider>(
       builder: (context, themeProvider, child) {
         final isModern = themeProvider.themeMode == AppThemeMode.glassmorphic;
 
-        return DynamicColorBuilder(
-          builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
-            ColorScheme lightScheme = lightDynamic ?? ColorScheme.fromSeed(seedColor: const Color(0xFF4C44D4));
-            ColorScheme darkScheme = darkDynamic ?? ColorScheme.fromSeed(seedColor: const Color(0xFF4C44D4), brightness: Brightness.dark);
-
-            return MaterialApp(
-              title: 'Fintrack',
-              debugShowCheckedModeBanner: false,
-              theme: isModern 
-                ? _buildModernTheme(Brightness.light)
-                : ThemeData(colorScheme: lightScheme, useMaterial3: true, textTheme: GoogleFonts.interTextTheme()),
-              darkTheme: isModern
-                ? _buildModernTheme(Brightness.dark)
-                : ThemeData(colorScheme: darkScheme, useMaterial3: true, textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme)),
-              themeMode: ThemeMode.system, 
-              home: const BooksScreen(), 
-            );
-          },
+        return MaterialApp(
+          title: AppConstants.appName,
+          debugShowCheckedModeBanner: false,
+          
+          // Toggle off: Standard Material You
+          theme: isModern 
+            ? _buildSignatureTheme(Brightness.light)
+            : ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: AppConstants.primaryColor), useMaterial3: true, textTheme: GoogleFonts.interTextTheme()),
+          
+          // Toggle off (Dark): Standard Material You Dark
+          darkTheme: isModern
+            ? _buildSignatureTheme(Brightness.dark)
+            : ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: AppConstants.primaryColor, brightness: Brightness.dark), useMaterial3: true, textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme)),
+          
+          themeMode: ThemeMode.system, 
+          home: const BooksScreen(), 
         );
       }
     );
   }
 
-  ThemeData _buildModernTheme(Brightness brightness) {
+  // Toggle on: The Custom Premium AMOLED Vibe
+  ThemeData _buildSignatureTheme(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
-      scaffoldBackgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
+      scaffoldBackgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
       colorScheme: ColorScheme.fromSeed(
-        seedColor: const Color(0xFF4C44D4),
+        seedColor: AppConstants.primaryColor,
         brightness: brightness,
       ),
       textTheme: GoogleFonts.interTextTheme(
