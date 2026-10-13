@@ -1,51 +1,59 @@
 class TransactionModel {
   final int? id;
-  final String type; // 'Expense', 'Income', 'Given', 'Received'
+  final int bookId; // Links to the Book
+  final String type; // 'Expense', 'Income'
   final double amount;
-  final String? partyName;
+  final String name; 
   final String category;
   final String? notes;
-  final String? imagePath; // Path to the local screenshot/receipt
+  final String? imagePath;
   final DateTime date;
-  final String currency; // Allows different currencies per transaction
+  final String currency;
+  final String paymentMode;
 
   TransactionModel({
     this.id,
+    required this.bookId,
     required this.type,
     required this.amount,
-    this.partyName,
+    required this.name,
     required this.category,
     this.notes,
     this.imagePath,
     required this.date,
     required this.currency,
+    required this.paymentMode,
   });
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'bookId': bookId,
       'type': type,
       'amount': amount,
-      'partyName': partyName,
+      'name': name,
       'category': category,
       'notes': notes,
       'imagePath': imagePath,
       'date': date.toIso8601String(),
       'currency': currency,
+      'paymentMode': paymentMode,
     };
   }
 
   factory TransactionModel.fromMap(Map<String, dynamic> map) {
     return TransactionModel(
       id: map['id'],
+      bookId: map['bookId'],
       type: map['type'],
       amount: map['amount'],
-      partyName: map['partyName'],
+      name: map['name'] ?? 'Transaction',
       category: map['category'],
       notes: map['notes'],
       imagePath: map['imagePath'],
       date: DateTime.parse(map['date']),
       currency: map['currency'],
+      paymentMode: map['paymentMode'] ?? 'Cash',
     );
   }
 }
