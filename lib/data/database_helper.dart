@@ -27,7 +27,7 @@ class DatabaseHelper {
   }
 
   Future _createDB(Database db, int version) async {
-    // Enable foreign keys for SQLite
+    // Enable foreign keys so deleting a book automatically deletes its transactions
     await db.execute('PRAGMA foreign_keys = ON');
 
     await db.execute('''
@@ -55,17 +55,17 @@ class DatabaseHelper {
     )
     ''');
     
-    // Create a default book so the app isn't empty on first launch
+    // Default starting book
     await db.insert('books', {'name': 'Personal Expenses', 'updatedAt': DateTime.now().toIso8601String()});
   }
 
   // --- BOOK METHODS ---
+
   Future<int> insertBook(BookModel book) async {
     final db = await instance.database;
     return await db.insert('books', book.toMap());
   }
 
-  // Gets all books and calculates their Net Balance, Total In, and Total Out instantly
   Future<List<Map<String, dynamic>>> getBooksWithBalances() async {
     final db = await instance.database;
     return await db.rawQuery('''
@@ -79,20 +79,6 @@ class DatabaseHelper {
     ''');
   }
 
-  // --- TRANSACTION METHODS ---
-  Future<int> insertTransaction(TransactionModel transaction) async {
-    final db = await instance.database;
-    // Update the book's 'updatedAt' timestamp when a transaction is added
-    await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
-    return await db.insert('transactions', transaction.toMap());
-  }
-
-  Future<List<TransactionModel>> readTransactionsForBook(int bookId) async {
-    final db = await instance.database;
-    final result = await db.query('transactions', where: 'bookId = ?', whereArgs: [bookId], orderBy: 'date DESC');
-    return result.map((json) => TransactionModel.fromMap(json)).toList();
-  }
-}
   Future<int> updateBookName(int id, String newName) async {
     final db = await instance.database;
     return await db.update(
@@ -105,11 +91,35 @@ class DatabaseHelper {
 
   Future<int> deleteBook(int id) async {
     final db = await instance.database;
-    // Because we set ON DELETE CASCADE when creating the table, 
-    // deleting a book automatically deletes all its transactions.
     return await db.delete(
       'books',
       where: 'id = ?',
       whereArgs: [id],
     );
   }
+
+  // --- TRANSACTION METHODS ---
+
+  Future<int> insertTransaction(TransactionModel transaction) async {
+    final db = await instance.database;
+    await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
+    return await db.insert('transactions', transaction.toMap());
+  }
+
+  Future<List<TransactionModel>> readTransactionsForBook(int bookId) async {
+    final db = await instance.database;
+    final result = await db.query('transactions', where: 'bookId = ?', whereArgs: [bookId], orderBy: 'date DESC');
+    return result.map((json) => TransactionModel.fromMap(json)).toList();
+  }
+
+  Future<int> deleteTransaction(int id, int bookId) async {
+    final db = await instance.database;
+    // Update the book's timestamp when a transaction is deleted
+    await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [bookId]);
+    return await db.delete(
+      'transactions',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+}
