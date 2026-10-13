@@ -27,7 +27,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _refreshTransactions() async {
     setState(() => _isLoading = true);
-    // Now correctly fetches transactions only for THIS specific book
     final data = await DatabaseHelper.instance.readTransactionsForBook(widget.bookId);
     setState(() {
       _transactions = data;
@@ -49,6 +48,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     final totalIncome = _calculateTotal('Income');
     final totalExpenses = _calculateTotal('Expense');
     final totalBalance = totalIncome - totalExpenses;
@@ -63,73 +64,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(widget.bookName, style: const TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('Add Member, Book Activity etc', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-          ],
-        ),
-        actions: const [
-          Icon(Icons.person_add_alt_1_outlined, color: Color(0xFF4C44D4)),
-          SizedBox(width: 16),
-          Icon(Icons.picture_as_pdf_outlined, color: Color(0xFF4C44D4)),
-          SizedBox(width: 12),
-          Icon(Icons.more_vert, color: Colors.black),
-          SizedBox(width: 8),
-        ],
+        title: Text(widget.bookName, style: TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 20, fontWeight: FontWeight.bold)),
       ),
       body: Column(
         children: [
-          // Header Stats (Net Balance, Total In, Total Out)
+          // Header Stats Card
           Container(
-            color: Colors.white,
-            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Column(
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Net Balance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text('Net Balance', style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[800], fontSize: 16)),
                     Text(
                       '${totalBalance < 0 ? '-' : ''}$_selectedCurrency${totalBalance.abs().toStringAsFixed(0)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 22),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total In (+)', style: TextStyle(fontWeight: FontWeight.w600)),
-                    Text('$_selectedCurrency${totalIncome.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFF328D4D), fontWeight: FontWeight.w600)),
+                    Text('Total In (+)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
+                    Text('$_selectedCurrency${totalIncome.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFF328D4D), fontWeight: FontWeight.bold, fontSize: 14)),
                   ],
                 ),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Total Out (-)', style: TextStyle(fontWeight: FontWeight.w600)),
-                    Text('$_selectedCurrency${totalExpenses.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFFD33636), fontWeight: FontWeight.w600)),
+                    Text('Total Out (-)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
+                    Text('$_selectedCurrency${totalExpenses.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFFD33636), fontWeight: FontWeight.bold, fontSize: 14)),
                   ],
                 ),
-                const SizedBox(height: 16),
-                const Text('View Reports >', style: TextStyle(color: Color(0xFF4C44D4), fontWeight: FontWeight.bold)),
               ],
             ),
-          ),
-          
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Text('Showing ${_transactions.length} entries', style: const TextStyle(color: Colors.grey, fontSize: 12)),
           ),
           
           // Ledger List
@@ -145,13 +129,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            width: double.infinity,
-                            color: Colors.grey[100],
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            child: Text(dateKey, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                          Padding(
+                            padding: const EdgeInsets.only(left: 24, top: 8, bottom: 4),
+                            child: Text(dateKey, style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 13)),
                           ),
-                          ...dayTransactions.map((tx) => _buildTransactionRow(tx)).toList(),
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              children: dayTransactions.map((tx) => _buildTransactionRow(tx, isDark, tx == dayTransactions.last)).toList(),
+                            ),
+                          ),
                         ],
                       );
                     },
@@ -160,7 +151,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           
           // Fixed Bottom Buttons
           Container(
-            color: Colors.white,
+            color: isDark ? const Color(0xFF121212) : Colors.white,
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
@@ -169,7 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1E7B44),
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: 'Income'))).then((_) => _refreshTransactions());
@@ -184,7 +175,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFCB3C3C),
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     onPressed: () {
                       Navigator.push(context, MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: 'Expense'))).then((_) => _refreshTransactions());
@@ -201,13 +192,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildTransactionRow(TransactionModel tx) {
+  Widget _buildTransactionRow(TransactionModel tx, bool isDark, bool isLast) {
     final isIncome = tx.type == 'Income';
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.black12, width: 0.5)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      decoration: BoxDecoration(
+        border: isLast ? null : Border(bottom: BorderSide(color: isDark ? Colors.grey[800]! : Colors.grey[200]!, width: 1)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -216,40 +206,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(tx.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0F4FF),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(tx.paymentMode, style: const TextStyle(color: Color(0xFF4C44D4), fontSize: 12)),
-                ),
+                Text(tx.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black)),
+                const SizedBox(height: 6),
+                Text(tx.paymentMode, style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[500], fontSize: 13)),
               ],
             ),
           ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${tx.currency}${tx.amount.toStringAsFixed(0)}',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: isIncome ? const Color(0xFF328D4D) : const Color(0xFFD33636),
-                ),
-              ),
-              const SizedBox(height: 4),
-              if (tx.imagePath != null)
-                Row(
-                  children: const [
-                    Icon(Icons.attachment, size: 12, color: Colors.grey),
-                    SizedBox(width: 4),
-                    Text('1 Attachment', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  ],
-                ),
-            ],
+          Text(
+            '${tx.currency}${tx.amount.toStringAsFixed(0)}',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+              color: isIncome ? const Color(0xFF328D4D) : const Color(0xFFD33636),
+            ),
           ),
         ],
       ),
