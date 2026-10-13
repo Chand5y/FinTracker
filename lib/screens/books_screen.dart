@@ -14,7 +14,7 @@ class BooksScreen extends StatefulWidget {
 }
 
 class _BooksScreenState extends State<BooksScreen> {
-  int _selectedIndex = 1; 
+  int _selectedIndex = 0; // 0 = Books, 1 = Settings
   List<Map<String, dynamic>> _booksData = [];
   bool _isLoading = true;
 
@@ -71,17 +71,89 @@ class _BooksScreenState extends State<BooksScreen> {
                 if (dialogContext.mounted) {
                   Navigator.pop(dialogContext);
                 }
-                _refreshBooks(); // Forces the screen to update immediately
+                _refreshBooks(); 
               }
             },
-            child: const Text('Create book'),
+            child: const Text('Create'),
           ),
         ],
       ),
     );
   }
 
-  // Helper widget to create the rounded HyperOS style cards
+  // Handle Long Press on a Book
+  void _showBookOptionsBottomSheet(int bookId, String currentName) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(currentName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.edit, color: Colors.blue),
+                title: const Text('Edit Name'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showEditBookDialog(bookId, currentName);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Delete Book'),
+                subtitle: const Text('This will delete all transactions inside it.'),
+                onTap: () async {
+                  await DatabaseHelper.instance.deleteBook(bookId);
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  _refreshBooks();
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      }
+    );
+  }
+
+  void _showEditBookDialog(int bookId, String currentName) {
+    final TextEditingController nameController = TextEditingController(text: currentName);
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Rename Book'),
+        content: TextField(
+          controller: nameController,
+          decoration: InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4C44D4), foregroundColor: Colors.white),
+            onPressed: () async {
+              final text = nameController.text.trim();
+              if (text.isNotEmpty && text != currentName) {
+                await DatabaseHelper.instance.updateBookName(bookId, text);
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                _refreshBooks(); 
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCardGroup({required List<Widget> children, required bool isDark}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -95,7 +167,6 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // --- SETTINGS UI ---
   Widget _buildSettingsView(BuildContext context, bool isDark) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isGlass = themeProvider.themeMode == AppThemeMode.glassmorphic;
@@ -103,10 +174,7 @@ class _BooksScreenState extends State<BooksScreen> {
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 24)),
-        centerTitle: false,
+        title: const Text('Settings'),
       ),
       body: ListView(
         children: [
@@ -148,15 +216,11 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // --- CASHBOOKS UI ---
   Widget _buildBooksView(bool isDark) {
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text(AppConstants.appName, style: TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 24, fontWeight: FontWeight.bold)),
-        centerTitle: false,
+        title: const Text(AppConstants.appName),
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -178,7 +242,6 @@ class _BooksScreenState extends State<BooksScreen> {
                       final double netBalance = totalIn - totalOut;
                       final bool isNegative = netBalance < 0;
 
-                      // Builds a card for each book rather than a flat list with bold dividers
                       return Container(
                         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                         decoration: BoxDecoration(
@@ -187,6 +250,7 @@ class _BooksScreenState extends State<BooksScreen> {
                         ),
                         child: ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          // Tapping opens the ledger
                           onTap: () {
                             Navigator.push(
                               context,
@@ -194,6 +258,10 @@ class _BooksScreenState extends State<BooksScreen> {
                                 builder: (_) => DashboardScreen(bookId: book['id'], bookName: book['name']),
                               ),
                             ).then((_) => _refreshBooks());
+                          },
+                          // Long Press opens edit/delete menu
+                          onLongPress: () {
+                            _showBookOptionsBottomSheet(book['id'], book['name']);
                           },
                           leading: Container(
                             padding: const EdgeInsets.all(10),
@@ -234,11 +302,9 @@ class _BooksScreenState extends State<BooksScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: _selectedIndex == 1 
+      body: _selectedIndex == 0 
           ? _buildBooksView(isDark) 
-          : _selectedIndex == 3 
-              ? _buildSettingsView(context, isDark)
-              : Center(child: Text('Coming Soon', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+          : _buildSettingsView(context, isDark),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         type: BottomNavigationBarType.fixed,
@@ -248,9 +314,7 @@ class _BooksScreenState extends State<BooksScreen> {
         elevation: 8,
         onTap: (index) => setState(() => _selectedIndex = index),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Payments'),
           BottomNavigationBarItem(icon: Icon(Icons.book), label: 'Books'),
-          BottomNavigationBarItem(icon: Icon(Icons.credit_card), label: 'Passbook'),
           BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
