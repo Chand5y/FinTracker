@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../data/database_helper.dart';
 import '../data/book_model.dart';
 import '../core/constants.dart';
-import 'dashboard_screen.dart'; // We will update this in the next step
+import '../theme/theme_provider.dart';
+import 'dashboard_screen.dart';
 
 class BooksScreen extends StatefulWidget {
   const BooksScreen({Key? key}) : super(key: key);
@@ -12,6 +14,7 @@ class BooksScreen extends StatefulWidget {
 }
 
 class _BooksScreenState extends State<BooksScreen> {
+  int _selectedIndex = 1; // 1 = Cashbooks (Default)
   List<Map<String, dynamic>> _booksData = [];
   bool _isLoading = true;
 
@@ -30,6 +33,7 @@ class _BooksScreenState extends State<BooksScreen> {
     });
   }
 
+  // Enforces MM/DD/YYYY
   String _formatDateStrict(DateTime date) {
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
@@ -70,8 +74,63 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
+  // --- 1. THE SETTINGS UI ---
+  Widget _buildSettingsView(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isGlass = themeProvider.themeMode == AppThemeMode.glassmorphic;
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('Settings', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text('App Preferences', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.palette_outlined, color: Color(0xFF4C44D4)),
+            title: const Text('Apple Glassmorphic Theme'),
+            subtitle: const Text('Toggle between Glass and Cashbook styles'),
+            trailing: Switch(
+              value: isGlass,
+              activeColor: const Color(0xFF4C44D4),
+              onChanged: (val) => themeProvider.toggleTheme(),
+            ),
+          ),
+          const Divider(),
+          const SizedBox(height: 16),
+          const Text('Backup & Restore', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
+            title: const Text('Google Drive Backup'),
+            subtitle: const Text('Requires API setup'),
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Google Drive API configuration is required next.')),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.cloud_download_outlined, color: Colors.blue),
+            title: const Text('Restore from Drive'),
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Connect Google Drive to restore database.')),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 2. THE CASHBOOKS UI ---
+  Widget _buildBooksView() {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -84,9 +143,12 @@ class _BooksScreenState extends State<BooksScreen> {
             Text('Tap to switch business', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
           ],
         ),
-        actions: const [
-          Icon(Icons.person_add_alt_1_outlined, color: Color(0xFF4C44D4)),
-          SizedBox(width: 16),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.person_add_alt_1_outlined, color: Color(0xFF4C44D4)), 
+            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Contacts integration coming soon'))),
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       body: Column(
@@ -98,10 +160,9 @@ class _BooksScreenState extends State<BooksScreen> {
               children: [
                 const Text('Your Books', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
                 Row(
-                  children: const [
-                    Icon(Icons.filter_list, color: Color(0xFF4C44D4)),
-                    SizedBox(width: 16),
-                    Icon(Icons.search, color: Color(0xFF4C44D4)),
+                  children: [
+                    IconButton(icon: const Icon(Icons.filter_list, color: Color(0xFF4C44D4)), onPressed: () {}),
+                    IconButton(icon: const Icon(Icons.search, color: Color(0xFF4C44D4)), onPressed: () {}),
                   ],
                 )
               ],
@@ -116,12 +177,15 @@ class _BooksScreenState extends State<BooksScreen> {
                     separatorBuilder: (context, index) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final book = _booksData[index];
-                      final double netBalance = book['totalIn'] - book['totalOut'];
-                      final isNegative = netBalance < 0;
+                      
+                      // CRITICAL FIX: Explicitly cast to double to prevent the integer rendering crash
+                      final double totalIn = (book['totalIn'] ?? 0).toDouble();
+                      final double totalOut = (book['totalOut'] ?? 0).toDouble();
+                      final double netBalance = totalIn - totalOut;
+                      final bool isNegative = netBalance < 0;
 
                       return ListTile(
                         onTap: () {
-                          // Navigate to the Book Details screen
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -129,9 +193,9 @@ class _BooksScreenState extends State<BooksScreen> {
                             ),
                           ).then((_) => _refreshBooks());
                         },
-                        leading: CircleAvatar(
-                          backgroundColor: const Color(0xFFE8E8FA),
-                          child: const Icon(Icons.book, color: Color(0xFF4C44D4)),
+                        leading: const CircleAvatar(
+                          backgroundColor: Color(0xFFE8E8FA),
+                          child: Icon(Icons.book, color: Color(0xFF4C44D4)),
                         ),
                         title: Text(book['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text('Updated on ${_formatDateStrict(DateTime.parse(book['updatedAt']))}'),
@@ -161,6 +225,31 @@ class _BooksScreenState extends State<BooksScreen> {
         onPressed: _showAddBookDialog,
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text('Add new book', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  // --- 3. MAIN NAVIGATION SHELL ---
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _selectedIndex == 1 
+          ? _buildBooksView() 
+          : _selectedIndex == 3 
+              ? _buildSettingsView(context)
+              : const Center(child: Text('Under Construction')),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _selectedIndex,
+        type: BottomNavigationBarType.fixed,
+        selectedItemColor: const Color(0xFF4C44D4),
+        unselectedItemColor: Colors.grey,
+        onTap: (index) => setState(() => _selectedIndex = index),
+        items: const [
+          BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Payments'),
+          BottomNavigationBarItem(icon: Icon(Icons.book), label: 'Cashbooks'),
+          BottomNavigationBarItem(icon: Icon(Icons.credit_card), label: 'Passbook'),
+          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+        ],
       ),
     );
   }
