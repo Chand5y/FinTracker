@@ -14,7 +14,7 @@ class BooksScreen extends StatefulWidget {
 }
 
 class _BooksScreenState extends State<BooksScreen> {
-  int _selectedIndex = 1; // 1 = Cashbooks (Default)
+  int _selectedIndex = 1; 
   List<Map<String, dynamic>> _booksData = [];
   bool _isLoading = true;
 
@@ -33,7 +33,6 @@ class _BooksScreenState extends State<BooksScreen> {
     });
   }
 
-  // Enforces MM/DD/YYYY
   String _formatDateStrict(DateTime date) {
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
@@ -44,27 +43,35 @@ class _BooksScreenState extends State<BooksScreen> {
     final TextEditingController nameController = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Add new book'),
         content: TextField(
           controller: nameController,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Enter book name',
-            border: OutlineInputBorder(),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4C44D4), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF4C44D4), 
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
             onPressed: () async {
-              if (nameController.text.trim().isNotEmpty) {
+              final text = nameController.text.trim();
+              if (text.isNotEmpty) {
                 await DatabaseHelper.instance.insertBook(BookModel(
-                  name: nameController.text.trim(),
+                  name: text,
                   updatedAt: DateTime.now(),
                 ));
-                if (mounted) Navigator.pop(context);
-                _refreshBooks();
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                }
+                _refreshBooks(); // Forces the screen to update immediately
               }
             },
             child: const Text('Create book'),
@@ -74,145 +81,138 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // --- 1. THE SETTINGS UI ---
-  Widget _buildSettingsView(BuildContext context) {
+  // Helper widget to create the rounded HyperOS style cards
+  Widget _buildCardGroup({required List<Widget> children, required bool isDark}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        children: children,
+      ),
+    );
+  }
+
+  // --- SETTINGS UI ---
+  Widget _buildSettingsView(BuildContext context, bool isDark) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final isGlass = themeProvider.themeMode == AppThemeMode.glassmorphic;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Settings', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: Text('Settings', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 24)),
+        centerTitle: false,
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
         children: [
-          const Text('App Preferences', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
-          const SizedBox(height: 8),
-          ListTile(
-            leading: const Icon(Icons.palette_outlined, color: Color(0xFF4C44D4)),
-            title: const Text('Apple Glassmorphic Theme'),
-            subtitle: const Text('Toggle between Glass and Cashbook styles'),
-            trailing: Switch(
-              value: isGlass,
-              activeColor: const Color(0xFF4C44D4),
-              onChanged: (val) => themeProvider.toggleTheme(),
-            ),
+          _buildCardGroup(
+            isDark: isDark,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.palette_outlined, color: Color(0xFF4C44D4)),
+                title: Text('Modern Theme', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                subtitle: Text('Toggle visual style', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
+                trailing: Switch(
+                  value: isGlass,
+                  activeColor: const Color(0xFF4C44D4),
+                  onChanged: (val) => themeProvider.toggleTheme(),
+                ),
+              ),
+            ],
           ),
-          const Divider(),
-          const SizedBox(height: 16),
-          const Text('Backup & Restore', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
-          const SizedBox(height: 8),
-          ListTile(
-            leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
-            title: const Text('Google Drive Backup'),
-            subtitle: const Text('Requires API setup'),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Google Drive API configuration is required next.')),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.cloud_download_outlined, color: Colors.blue),
-            title: const Text('Restore from Drive'),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Connect Google Drive to restore database.')),
-              );
-            },
+          _buildCardGroup(
+            isDark: isDark,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
+                title: Text('Google Drive Backup', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {},
+              ),
+              Divider(height: 1, indent: 50, color: isDark ? Colors.grey[800] : Colors.grey[200]),
+              ListTile(
+                leading: const Icon(Icons.cloud_download_outlined, color: Colors.blue),
+                title: Text('Restore from Drive', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {},
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // --- 2. THE CASHBOOKS UI ---
-  Widget _buildBooksView() {
+  // --- CASHBOOKS UI ---
+  Widget _buildBooksView(bool isDark) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Fintracker Business', style: TextStyle(color: Colors.black, fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('Tap to switch business', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add_alt_1_outlined, color: Color(0xFF4C44D4)), 
-            onPressed: () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Contacts integration coming soon'))),
-          ),
-          const SizedBox(width: 8),
-        ],
+        title: Text(AppConstants.appName, style: TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 24, fontWeight: FontWeight.bold)),
+        centerTitle: false,
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Your Books', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-                Row(
-                  children: [
-                    IconButton(icon: const Icon(Icons.filter_list, color: Color(0xFF4C44D4)), onPressed: () {}),
-                    IconButton(icon: const Icon(Icons.search, color: Color(0xFF4C44D4)), onPressed: () {}),
-                  ],
-                )
-              ],
-            ),
+            padding: const EdgeInsets.only(left: 24, top: 8, bottom: 8),
+            child: Text('Your Books', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontWeight: FontWeight.bold, fontSize: 14)),
           ),
-          const Divider(height: 1),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : ListView.separated(
+                : ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 80),
                     itemCount: _booksData.length,
-                    separatorBuilder: (context, index) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final book = _booksData[index];
-                      
-                      // CRITICAL FIX: Explicitly cast to double to prevent the integer rendering crash
                       final double totalIn = (book['totalIn'] ?? 0).toDouble();
                       final double totalOut = (book['totalOut'] ?? 0).toDouble();
                       final double netBalance = totalIn - totalOut;
                       final bool isNegative = netBalance < 0;
 
-                      return ListTile(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => DashboardScreen(bookId: book['id'], bookName: book['name']),
-                            ),
-                          ).then((_) => _refreshBooks());
-                        },
-                        leading: const CircleAvatar(
-                          backgroundColor: Color(0xFFE8E8FA),
-                          child: Icon(Icons.book, color: Color(0xFF4C44D4)),
+                      // Builds a card for each book rather than a flat list with bold dividers
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        title: Text(book['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                        subtitle: Text('Updated on ${_formatDateStrict(DateTime.parse(book['updatedAt']))}'),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                                color: isNegative ? const Color(0xFFD33636) : const Color(0xFF328D4D),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => DashboardScreen(bookId: book['id'], bookName: book['name']),
                               ),
+                            ).then((_) => _refreshBooks());
+                          },
+                          leading: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF4C44D4).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.more_vert, color: Colors.grey),
-                          ],
+                            child: const Icon(Icons.book, color: Color(0xFF4C44D4)),
+                          ),
+                          title: Text(book['name'], style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black)),
+                          subtitle: Text('Updated ${_formatDateStrict(DateTime.parse(book['updatedAt']))}', style: TextStyle(fontSize: 12, color: isDark ? Colors.grey[400] : Colors.grey[500])),
+                          trailing: Text(
+                            '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: isNegative ? const Color(0xFFD33636) : const Color(0xFF328D4D),
+                            ),
+                          ),
                         ),
                       );
                     },
@@ -224,29 +224,32 @@ class _BooksScreenState extends State<BooksScreen> {
         backgroundColor: const Color(0xFF4C44D4),
         onPressed: _showAddBookDialog,
         icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('Add new book', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        label: const Text('New Book', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }
 
-  // --- 3. MAIN NAVIGATION SHELL ---
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       body: _selectedIndex == 1 
-          ? _buildBooksView() 
+          ? _buildBooksView(isDark) 
           : _selectedIndex == 3 
-              ? _buildSettingsView(context)
-              : const Center(child: Text('Under Construction')),
+              ? _buildSettingsView(context, isDark)
+              : Center(child: Text('Coming Soon', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         type: BottomNavigationBarType.fixed,
+        backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         selectedItemColor: const Color(0xFF4C44D4),
         unselectedItemColor: Colors.grey,
+        elevation: 8,
         onTap: (index) => setState(() => _selectedIndex = index),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.payment), label: 'Payments'),
-          BottomNavigationBarItem(icon: Icon(Icons.book), label: 'Cashbooks'),
+          BottomNavigationBarItem(icon: Icon(Icons.book), label: 'Books'),
           BottomNavigationBarItem(icon: Icon(Icons.credit_card), label: 'Passbook'),
           BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],
