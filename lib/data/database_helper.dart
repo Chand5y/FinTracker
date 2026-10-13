@@ -11,30 +11,26 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('fintracker_v3.db');
+    _database = await _initDB('fintrack_v4.db');
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _createDB,
-    );
+    return await openDatabase(path, version: 1, onCreate: _createDB);
   }
 
   Future _createDB(Database db, int version) async {
-    // Enable foreign keys so deleting a book automatically deletes its transactions
     await db.execute('PRAGMA foreign_keys = ON');
 
     await db.execute('''
     CREATE TABLE books (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      updatedAt TEXT NOT NULL
+      name TEXT UNIQUE NOT NULL, -- Blocks duplicate names
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      isPinned INTEGER DEFAULT 0
     )
     ''');
 
@@ -54,56 +50,60 @@ class DatabaseHelper {
       FOREIGN KEY (bookId) REFERENCES books (id) ON DELETE CASCADE
     )
     ''');
-    
-    // Default starting book
-    await db.insert('books', {'name': 'Personal Expenses', 'updatedAt': DateTime.now().toIso8601String()});
   }
 
   // --- BOOK METHODS ---
-
   Future<int> insertBook(BookModel book) async {
     final db = await instance.database;
-    return await db.insert('books', book.toMap());
+    try {
+      return await db.insert('books', book.toMap());
+    } catch (e) {
+      return -1; // Duplicate name caught
+    }
   }
 
   Future<List<Map<String, dynamic>>> getBooksWithBalances() async {
     final db = await instance.database;
     return await db.rawQuery('''
-      SELECT b.id, b.name, b.updatedAt,
+      SELECT b.id, b.name, b.createdAt, b.updatedAt, b.isPinned,
              COALESCE(SUM(CASE WHEN t.type = 'Income' THEN t.amount ELSE 0 END), 0) as totalIn,
              COALESCE(SUM(CASE WHEN t.type = 'Expense' THEN t.amount ELSE 0 END), 0) as totalOut
       FROM books b
       LEFT JOIN transactions t ON b.id = t.bookId
       GROUP BY b.id
-      ORDER BY b.updatedAt DESC
     ''');
+  }
+
+  Future<int> togglePinBook(int id, bool isPinned) async {
+    final db = await instance.database;
+    return await db.update('books', {'isPinned': isPinned ? 1 : 0}, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<int> updateBookName(int id, String newName) async {
     final db = await instance.database;
-    return await db.update(
-      'books',
-      {'name': newName, 'updatedAt': DateTime.now().toIso8601String()},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    try {
+      return await db.update('books', {'name': newName, 'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [id]);
+    } catch (e) {
+      return -1; // Duplicate name
+    }
   }
 
   Future<int> deleteBook(int id) async {
     final db = await instance.database;
-    return await db.delete(
-      'books',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return await db.delete('books', where: 'id = ?', whereArgs: [id]);
   }
 
   // --- TRANSACTION METHODS ---
-
   Future<int> insertTransaction(TransactionModel transaction) async {
     final db = await instance.database;
     await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
     return await db.insert('transactions', transaction.toMap());
+  }
+  
+  Future<int> updateTransaction(TransactionModel transaction) async {
+    final db = await instance.database;
+    await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
+    return await db.update('transactions', transaction.toMap(), where: 'id = ?', whereArgs: [transaction.id]);
   }
 
   Future<List<TransactionModel>> readTransactionsForBook(int bookId) async {
@@ -114,12 +114,7 @@ class DatabaseHelper {
 
   Future<int> deleteTransaction(int id, int bookId) async {
     final db = await instance.database;
-    // Update the book's timestamp when a transaction is deleted
     await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [bookId]);
-    return await db.delete(
-      'transactions',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    return await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
   }
 }
