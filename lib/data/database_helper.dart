@@ -93,3 +93,23 @@ class DatabaseHelper {
     return result.map((json) => TransactionModel.fromMap(json)).toList();
   }
 }
+  Future<int> updateBookName(int id, String newName) async {
+    final db = await instance.database;
+    return await db.update(
+      'books',
+      {'name': newName, 'updatedAt': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<int> deleteBook(int id) async {
+    final db = await instance.database;
+    // Because we set ON DELETE CASCADE when creating the table, 
+    // deleting a book automatically deletes all its transactions.
+    return await db.delete(
+      'books',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
