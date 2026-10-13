@@ -1,18 +1,20 @@
 class AppConstants {
-  static const String appName = 'Fintracker';
+  static const String appName = 'Fintrack'; 
   static const String defaultCurrency = '₹';
   
   static const List<String> defaultCategories = [
-    'Civil Disobedience',
-    'Criminal Intent',
-    'Domestic Crimes',
-    'Judgment/Prop. Damage',
-    'Security Related',
-    'Sex Crimes',
-    'Substance Abuse',
-    'Theft/Fraud/Burglary',
-    'Traffic',
-    'Violence & Threats'
+    'Food & Dining',
+    'Transportation & Fuel',
+    'Housing & Rent',
+    'Utilities & Bills',
+    'Groceries',
+    'Entertainment',
+    'Shopping',
+    'Healthcare & Medical',
+    'Salary / Income',
+    'Lent to Someone',
+    'Repayment Received',
+    'Miscellaneous'
   ];
 
   static const List<String> availableCurrencies = [
