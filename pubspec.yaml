@@ -1,4 +1,4 @@
-name: fintracker
+name: fintrack
 description: A private offline-first financial management app.
 publish_to: 'none'
 version: 1.0.0+1
@@ -19,6 +19,7 @@ dependencies:
   image_picker: ^1.0.4
   pdf: ^3.10.7
   printing: ^5.11.1
+  shared_preferences: ^2.2.3 # Added to fix the theme provider crash
 
 dev_dependencies:
   flutter_test:
