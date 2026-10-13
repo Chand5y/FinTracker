@@ -4,7 +4,7 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'theme/theme_provider.dart';
-import 'screens/dashboard_screen.dart';
+import 'screens/books_screen.dart'; // Changed to open the Books screen
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,7 +50,7 @@ class FintrackerApp extends StatelessWidget {
                 textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme)
               ),
           themeMode: ThemeMode.system, // Respects your phone's dark/light mode
-          home: const DashboardScreen(), // Connects directly to your new dashboard
+          home: const BooksScreen(), // Starts the app on the new Books Screen
         );
       },
     );
