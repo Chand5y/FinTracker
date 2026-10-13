@@ -41,7 +41,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               pw.Text('${widget.bookName} Ledger', style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 20),
-              pw.TableHelper.fromTextArray(
+              pw.Table.fromTextArray(
                 headers: ['Date', 'Name', 'Category', 'Mode', 'Type', 'Amount'],
                 data: _transactions.map((tx) => [
                   "${tx.date.month}/${tx.date.day}/${tx.date.year}", tx.name, tx.category, tx.paymentMode, tx.type, tx.amount.toString()
@@ -80,10 +80,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  double _calculateTotal(String type) {
+    return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final totalIncome = _calculateTotal('Income');
+    final totalExpenses = _calculateTotal('Expense');
+    final totalBalance = totalIncome - totalExpenses;
+
     return Scaffold(
       backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
       appBar: AppBar(
@@ -94,7 +101,43 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       body: Column(
         children: [
-          // Header Stats Card omitted for brevity (Keep your existing Header Stats Card here)
+          // Header Stats Card
+          Container(
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: isDark ? AppConstants.surfaceDark : Colors.white, borderRadius: BorderRadius.circular(20)),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Net Balance', style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[800], fontSize: 16)),
+                    Text(
+                      '${totalBalance < 0 ? '-' : ''}${AppConstants.defaultCurrency}${totalBalance.abs().toStringAsFixed(0)}',
+                      style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 22),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total In (+)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
+                    Text('${AppConstants.defaultCurrency}${totalIncome.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFF328D4D), fontWeight: FontWeight.bold, fontSize: 14)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total Out (-)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
+                    Text('${AppConstants.defaultCurrency}${totalExpenses.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFFD33636), fontWeight: FontWeight.bold, fontSize: 14)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
           Expanded(
             child: _isLoading ? const Center(child: CircularProgressIndicator()) : ListView.builder(
               itemCount: _transactions.length,
@@ -107,12 +150,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     borderRadius: BorderRadius.circular(16),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
-                      // Short press: Edit
                       onTap: () {
                         HapticFeedback.lightImpact();
                         Navigator.push(context, MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: tx.type, existingTransaction: tx))).then((_) => _refreshTransactions());
                       },
-                      // Long press: Delete
                       onLongPress: () => _showTransactionOptions(tx),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
@@ -136,7 +177,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
               },
             ),
           ),
-          // Fixed Bottom Buttons omitted for brevity (Keep your existing buttons here)
+          
+          // Fixed Bottom Buttons
+          Container(
+            color: isDark ? AppConstants.backgroundDark : Colors.white,
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E7B44),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: 'Income'))).then((_) => _refreshTransactions());
+                    },
+                    icon: const Icon(Icons.add, color: Colors.white),
+                    label: const Text('Cash In', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFCB3C3C),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () {
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: 'Expense'))).then((_) => _refreshTransactions());
+                    },
+                    icon: const Icon(Icons.remove, color: Colors.white),
+                    label: const Text('Cash Out', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          )
         ],
       ),
     );
