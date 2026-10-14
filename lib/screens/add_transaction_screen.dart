@@ -2,9 +2,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import '../core/constants.dart';
 import '../data/database_helper.dart';
 import '../data/transaction_model.dart';
+import '../theme/theme_provider.dart';
 
 class AddTransactionScreen extends StatefulWidget {
   final int bookId;
@@ -47,6 +49,27 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     }
   }
 
+  void _openImageFullScreen() {
+    HapticFeedback.lightImpact();
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          iconTheme: const IconThemeData(color: Colors.white),
+        ),
+        body: Center(
+          child: InteractiveViewer(
+            panEnabled: true,
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Image.file(File(_imagePath)),
+          ),
+        ),
+      )
+    ));
+  }
+
   Future<void> _saveTransaction() async {
     if (!_formKey.currentState!.validate()) return;
     HapticFeedback.mediumImpact();
@@ -75,10 +98,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isSignature = themeProvider.themeMode == AppThemeMode.glassmorphic;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isSignature || isDark ? Colors.white : Colors.black;
 
     return Scaffold(
-      backgroundColor: isDark ? AppConstants.backgroundDark : Colors.white,
+      backgroundColor: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : Colors.white),
       appBar: AppBar(title: Text(widget.existingTransaction == null ? 'Add $_selectedType' : 'Edit $_selectedType')),
       body: Form(
         key: _formKey,
@@ -89,44 +115,67 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               controller: _amountController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
               style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: _selectedType == 'Income' ? const Color(0xFF328D4D) : const Color(0xFFD33636)),
-              decoration: const InputDecoration(labelText: 'Amount', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                labelText: 'Amount',
+                labelStyle: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[700]),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature || isDark ? Colors.grey[700]! : Colors.grey[400]!)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? AppConstants.primaryColor : Colors.blue)),
+              ),
             ),
             const SizedBox(height: 20),
             TextFormField(
               controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Name (e.g., Electricity Bill)', border: OutlineInputBorder()),
+              style: TextStyle(color: textColor),
+              decoration: InputDecoration(
+                labelText: 'Name (e.g., Electricity Bill)', 
+                labelStyle: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[700]),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature || isDark ? Colors.grey[700]! : Colors.grey[400]!)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? AppConstants.primaryColor : Colors.blue)),
+              ),
             ),
             const SizedBox(height: 20),
             DropdownButtonFormField<String>(
               value: _selectedCategory,
-              decoration: const InputDecoration(labelText: 'Category (Optional)', border: OutlineInputBorder()),
-              items: AppConstants.categories.map((c) => DropdownMenuItem(value: c['name'], child: Text('${c['emoji']}  ${c['name']}'))).toList(),
+              dropdownColor: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Category (Optional)', 
+                labelStyle: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[700]),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature || isDark ? Colors.grey[700]! : Colors.grey[400]!)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? AppConstants.primaryColor : Colors.blue)),
+              ),
+              items: AppConstants.categories.map((c) => DropdownMenuItem(value: c['name'], child: Text('${c['emoji']}  ${c['name']}', style: TextStyle(color: textColor)))).toList(),
               onChanged: (val) => setState(() => _selectedCategory = val),
             ),
             const SizedBox(height: 20),
             DropdownButtonFormField<String>(
               value: _paymentMode,
-              decoration: const InputDecoration(labelText: 'Payment Method', border: OutlineInputBorder()),
-              items: AppConstants.paymentModes.map((mode) => DropdownMenuItem(value: mode, child: Text(mode))).toList(),
+              dropdownColor: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Payment Method', 
+                labelStyle: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[700]),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature || isDark ? Colors.grey[700]! : Colors.grey[400]!)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? AppConstants.primaryColor : Colors.blue)),
+              ),
+              items: AppConstants.paymentModes.map((mode) => DropdownMenuItem(value: mode, child: Text(mode, style: TextStyle(color: textColor)))).toList(),
               onChanged: (val) => setState(() => _paymentMode = val!),
             ),
             const SizedBox(height: 20),
             
-            // Attachment Section
             InkWell(
               onTap: _pickImage,
               borderRadius: BorderRadius.circular(12),
               child: Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  border: Border.all(color: isDark ? Colors.grey[800]! : Colors.grey[300]!),
+                  color: isSignature ? AppConstants.surfaceDark : Colors.transparent,
+                  border: Border.all(color: isSignature || isDark ? Colors.grey[700]! : Colors.grey[400]!),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.image, color: AppConstants.primaryColor),
+                    Icon(Icons.image, color: isSignature ? AppConstants.primaryColor : Colors.blue),
                     const SizedBox(width: 12),
-                    Expanded(child: Text(_imagePath.isEmpty ? 'Attach Receipt or Image' : 'Change Image', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+                    Expanded(child: Text(_imagePath.isEmpty ? 'Attach Receipt or Image' : 'Change Image', style: TextStyle(color: textColor))),
                   ],
                 ),
               ),
@@ -137,12 +186,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               Stack(
                 alignment: Alignment.topRight,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(File(_imagePath), height: 150, width: double.infinity, fit: BoxFit.cover),
+                  GestureDetector(
+                    onTap: _openImageFullScreen,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.file(File(_imagePath), height: 150, width: double.infinity, fit: BoxFit.cover),
+                    ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.cancel, color: Colors.white),
+                    icon: const Icon(Icons.cancel, color: Colors.white, shadows: [Shadow(color: Colors.black, blurRadius: 4)]),
                     onPressed: () => setState(() => _imagePath = ''),
                   ),
                 ],
@@ -151,9 +203,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             
             const SizedBox(height: 40),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppConstants.primaryColor, padding: const EdgeInsets.symmetric(vertical: 16)),
+              style: ElevatedButton.styleFrom(backgroundColor: isSignature ? AppConstants.primaryColor : Colors.blue, padding: const EdgeInsets.symmetric(vertical: 16)),
               onPressed: _saveTransaction,
-              child: const Text('Save', style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold)),
+              child: Text('Save', style: TextStyle(fontSize: 18, color: isSignature ? Colors.black : Colors.white, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
