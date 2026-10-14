@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../data/database_helper.dart';
 import '../data/book_model.dart';
+import '../data/transaction_model.dart';
 import '../core/constants.dart';
 import '../theme/theme_provider.dart';
 import 'dashboard_screen.dart';
@@ -17,8 +18,11 @@ class BooksScreen extends StatefulWidget {
 }
 
 class _BooksScreenState extends State<BooksScreen> {
-  int _selectedIndex = 0; 
+  static const MethodChannel _smsChannel = MethodChannel('com.chandankumar.fintrack/sms');
+
+  int _selectedIndex = 0;
   List<Map<String, dynamic>> _booksData = [];
+  List<ParsedSmsTransaction> _smsSuggestions = [];
   bool _isLoading = true;
   BookSort _currentSort = BookSort.updated;
 
@@ -29,75 +33,125 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   Future<void> _refreshBooks() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
-    List<Map<String, dynamic>> data = await DatabaseHelper.instance.getBooksWithBalances();
-    
-    data.sort((a, b) {
-      if (a['isPinned'] == 1 && b['isPinned'] == 0) return -1;
-      if (a['isPinned'] == 0 && b['isPinned'] == 1) return 1;
-      
-      switch (_currentSort) {
-        case BookSort.updated:
-          return DateTime.parse(b['updatedAt']).compareTo(DateTime.parse(a['updatedAt']));
-        case BookSort.created:
-          return DateTime.parse(b['createdAt']).compareTo(DateTime.parse(a['createdAt']));
-        case BookSort.aToZ:
-          return a['name'].toString().toLowerCase().compareTo(b['name'].toString().toLowerCase());
-        case BookSort.zToA:
-          return b['name'].toString().toLowerCase().compareTo(a['name'].toString().toLowerCase());
-      }
-    });
+    try {
+      final List<Map<String, dynamic>> data = await DatabaseHelper.instance.getBooksWithBalances();
 
-    setState(() {
-      _booksData = data;
-      _isLoading = false;
-    });
+      data.sort((a, b) {
+        final int pinA = (a['isPinned'] ?? 0) as int;
+        final int pinB = (b['isPinned'] ?? 0) as int;
+        if (pinA == 1 && pinB == 0) return -1;
+        if (pinA == 0 && pinB == 1) return 1;
+
+        final DateTime upA = DateTime.tryParse(a['updatedAt']?.toString() ?? '') ?? DateTime.now();
+        final DateTime upB = DateTime.tryParse(b['updatedAt']?.toString() ?? '') ?? DateTime.now();
+        final DateTime crA = DateTime.tryParse(a['createdAt']?.toString() ?? '') ?? upA;
+        final DateTime crB = DateTime.tryParse(b['createdAt']?.toString() ?? '') ?? upB;
+
+        switch (_currentSort) {
+          case BookSort.updated:
+            return upB.compareTo(upA);
+          case BookSort.created:
+            return crB.compareTo(crA);
+          case BookSort.aToZ:
+            return a['name'].toString().toLowerCase().compareTo(b['name'].toString().toLowerCase());
+          case BookSort.zToA:
+            return b['name'].toString().toLowerCase().compareTo(a['name'].toString().toLowerCase());
+        }
+      });
+
+      if (mounted) {
+        setState(() => _booksData = data);
+      }
+      await _scanSmsIfEnabled();
+    } catch (e) {
+      debugPrint('Error loading books: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
-  String _formatDateStrict(DateTime date) {
+  Future<void> _scanSmsIfEnabled() async {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    if (!themeProvider.smsAutoTrack) {
+      if (mounted) setState(() => _smsSuggestions = []);
+      return;
+    }
+    try {
+      final bool hasPerm = await _smsChannel.invokeMethod('checkSmsPermission') ?? false;
+      if (!hasPerm) return;
+
+      final List<dynamic> rawSms = await _smsChannel.invokeMethod('getBankSms') ?? [];
+      final Set<String> handledIds = await DatabaseHelper.instance.getHandledSmsIds();
+
+      final List<ParsedSmsTransaction> parsed = [];
+      for (final item in rawSms) {
+        if (item is Map) {
+          final tx = ParsedSmsTransaction.tryParse(item);
+          if (tx != null && !handledIds.contains(tx.smsId)) {
+            parsed.add(tx);
+          }
+        }
+      }
+      if (mounted) {
+        setState(() => _smsSuggestions = parsed);
+      }
+    } catch (e) {
+      debugPrint('SMS Scan skipped: $e');
+    }
+  }
+
+  String _formatDateStrict(String? isoString) {
+    final DateTime date = DateTime.tryParse(isoString ?? '') ?? DateTime.now();
     final month = date.month.toString().padLeft(2, '0');
     final day = date.day.toString().padLeft(2, '0');
     return "$month/$day/${date.year}";
   }
 
-  void _showAddBookDialog(bool isSignature) {
+  void _showAddBookDialog() {
     HapticFeedback.lightImpact();
     final TextEditingController nameController = TextEditingController();
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: isSignature ? AppConstants.surfaceDark : null,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('New Book', style: TextStyle(color: isSignature ? Colors.white : Colors.black)),
+        title: const Text('Create New Book', style: TextStyle(fontWeight: FontWeight.w700)),
         content: TextField(
           controller: nameController,
+          autofocus: true,
           textCapitalization: TextCapitalization.words,
-          style: TextStyle(color: isSignature ? Colors.white : Colors.black),
           decoration: InputDecoration(
-            labelText: 'Enter book name',
-            labelStyle: TextStyle(color: isSignature ? Colors.grey[400] : Colors.grey[700]),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? Colors.grey[700]! : Colors.grey[400]!)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? AppConstants.primaryColor : Colors.blue)),
+            hintText: 'e.g., Monthly Expenses',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text('Cancel', style: TextStyle(color: isSignature ? Colors.grey[400] : Colors.blue))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: isSignature ? AppConstants.primaryColor : Colors.blue, foregroundColor: isSignature ? Colors.black : Colors.white),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
             onPressed: () async {
               final text = nameController.text.trim();
-              if (text.isNotEmpty) {
-                int result = await DatabaseHelper.instance.insertBook(BookModel(name: text, createdAt: DateTime.now(), updatedAt: DateTime.now()));
-                if (result == -1) {
-                  HapticFeedback.heavyImpact();
-                  if (dialogContext.mounted) {
-                    ScaffoldMessenger.of(dialogContext).showSnackBar(const SnackBar(content: Text('A book with this name already exists.'), backgroundColor: Colors.red));
-                  }
-                } else {
-                  HapticFeedback.mediumImpact();
-                  if (dialogContext.mounted) Navigator.pop(dialogContext);
-                  _refreshBooks();
+              if (text.isEmpty) return;
+              final now = DateTime.now();
+              final result = await DatabaseHelper.instance.insertBook(
+                BookModel(name: text, createdAt: now, updatedAt: now),
+              );
+              if (result == -1) {
+                HapticFeedback.heavyImpact();
+                if (dialogContext.mounted) {
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    const SnackBar(content: Text('A book with this name already exists.'), backgroundColor: AppConstants.expenseRed),
+                  );
                 }
+              } else {
+                HapticFeedback.mediumImpact();
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                _refreshBooks();
               }
             },
             child: const Text('Create'),
@@ -107,223 +161,576 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  void _showBookOptions(int bookId, String currentName, int isPinned, bool isSignature) {
-    HapticFeedback.selectionClick();
-    showModalBottomSheet(
+  void _showEditBookDialog(int bookId, String currentName) {
+    final TextEditingController nameController = TextEditingController(text: currentName);
+    showDialog(
       context: context,
-      backgroundColor: isSignature ? AppConstants.surfaceDark : Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(padding: const EdgeInsets.all(16.0), child: Text(currentName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isSignature ? Colors.white : Colors.black))),
-            Divider(height: 1, color: isSignature ? Colors.grey[800] : Colors.grey[300]),
-            ListTile(
-              leading: Icon(isPinned == 1 ? Icons.push_pin_outlined : Icons.push_pin, color: isSignature ? AppConstants.primaryColor : Colors.blue),
-              title: Text(isPinned == 1 ? 'Unpin Book' : 'Pin to Top', style: TextStyle(color: isSignature ? Colors.white : Colors.black)),
-              onTap: () async {
-                HapticFeedback.lightImpact();
-                await DatabaseHelper.instance.togglePinBook(bookId, isPinned == 0);
-                if (sheetContext.mounted) Navigator.pop(sheetContext);
-                _refreshBooks();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Delete Book', style: TextStyle(color: Colors.red)),
-              onTap: () async {
-                HapticFeedback.heavyImpact();
-                await DatabaseHelper.instance.deleteBook(bookId);
-                if (sheetContext.mounted) Navigator.pop(sheetContext);
-                _refreshBooks();
-              },
-            ),
-          ],
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Rename Book', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
         ),
-      )
-    );
-  }
-
-  Widget _buildHeaderTypography(bool isSignature) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Row(
-          children: [
-            Text('Fin', style: TextStyle(color: isSignature ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 26)),
-            Text('Track', style: TextStyle(color: isSignature ? AppConstants.primaryColor : Colors.blue, fontWeight: FontWeight.bold, fontSize: 26)),
-          ],
-        ),
-        Text(
-          'YOUR PERSONAL FINANCE TRACKER', 
-          style: TextStyle(
-            color: isSignature ? Colors.grey[400] : Colors.grey[600], 
-            fontSize: 8, 
-            letterSpacing: 1.5, 
-            fontWeight: FontWeight.w600
-          )
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBooksView(bool isDark, bool isSignature) {
-    return Scaffold(
-      backgroundColor: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : const Color(0xFFF2F2F7)),
-      appBar: AppBar(
-        title: _buildHeaderTypography(isSignature), 
         actions: [
-          PopupMenuButton<BookSort>(
-            icon: Icon(Icons.sort, color: isSignature ? Colors.white : (isDark ? Colors.white : Colors.black)),
-            color: isSignature ? AppConstants.surfaceDark : null,
-            onSelected: (sort) {
-              HapticFeedback.selectionClick();
-              setState(() { _currentSort = sort; _refreshBooks(); });
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              final text = nameController.text.trim();
+              if (text.isNotEmpty && text != currentName) {
+                final res = await DatabaseHelper.instance.updateBookName(bookId, text);
+                if (res == -1) {
+                  HapticFeedback.heavyImpact();
+                  if (dialogContext.mounted) {
+                    ScaffoldMessenger.of(dialogContext).showSnackBar(
+                      const SnackBar(content: Text('A book with this name already exists.'), backgroundColor: AppConstants.expenseRed),
+                    );
+                  }
+                  return;
+                }
+                HapticFeedback.mediumImpact();
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                _refreshBooks();
+              }
             },
-            itemBuilder: (context) => [
-              PopupMenuItem(value: BookSort.updated, child: Text('Recently Updated', style: TextStyle(color: isSignature ? Colors.white : null))),
-              PopupMenuItem(value: BookSort.created, child: Text('Recently Created', style: TextStyle(color: isSignature ? Colors.white : null))),
-              PopupMenuItem(value: BookSort.aToZ, child: Text('A to Z', style: TextStyle(color: isSignature ? Colors.white : null))),
-              PopupMenuItem(value: BookSort.zToA, child: Text('Z to A', style: TextStyle(color: isSignature ? Colors.white : null))),
-            ],
-          )
+            child: const Text('Save'),
+          ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              padding: const EdgeInsets.only(bottom: 80, top: 8),
-              itemCount: _booksData.length,
-              itemBuilder: (context, index) {
-                final book = _booksData[index];
-                final bool isPinned = book['isPinned'] == 1;
-                final double netBalance = (book['totalIn'] ?? 0).toDouble() - (book['totalOut'] ?? 0).toDouble();
-                final bool isNegative = netBalance < 0;
+    );
+  }
 
-                Color cardColor = isSignature 
-                    ? (isPinned ? const Color(0xFF1E283D) : AppConstants.surfaceDark)
-                    : (isDark 
-                        ? (isPinned ? const Color(0xFF2C2C2C) : const Color(0xFF1E1E1E))
-                        : (isPinned ? const Color(0xFFF0F4FF) : Colors.white));
-
-                Color textColor = isSignature || isDark ? Colors.white : Colors.black;
-
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Material(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(16),
-                    elevation: isSignature || isDark ? 0 : 1,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        Navigator.push(context, MaterialPageRoute(builder: (_) => DashboardScreen(bookId: book['id'], bookName: book['name']))).then((_) => _refreshBooks());
-                      },
-                      onLongPress: () => _showBookOptions(book['id'], book['name'], book['isPinned'], isSignature),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(color: (isSignature ? AppConstants.primaryColor : Colors.blue).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                              child: Icon(isPinned ? Icons.push_pin : Icons.book, color: isSignature ? AppConstants.primaryColor : Colors.blue),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(book['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
-                                  const SizedBox(height: 4),
-                                  Text('Created: ${_formatDateStrict(DateTime.parse(book['createdAt']))}', style: TextStyle(fontSize: 11, color: isSignature || isDark ? Colors.grey[500] : Colors.grey[600])),
-                                  Text('Updated: ${_formatDateStrict(DateTime.parse(book['updatedAt']))}', style: TextStyle(fontSize: 11, color: isSignature || isDark ? Colors.grey[500] : Colors.grey[600])),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isNegative ? const Color(0xFFD33636) : const Color(0xFF328D4D)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: isSignature ? AppConstants.primaryColor : Colors.blue,
-        onPressed: () => _showAddBookDialog(isSignature),
-        icon: Icon(Icons.add, color: isSignature ? Colors.black : Colors.white),
-        label: Text('New Book', style: TextStyle(color: isSignature ? Colors.black : Colors.white, fontWeight: FontWeight.bold)),
+  void _showBookOptions(int bookId, String currentName, int isPinned) {
+    HapticFeedback.mediumImpact();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(currentName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              const Divider(),
+              ListTile(
+                leading: Icon(isPinned == 1 ? Icons.push_pin_outlined : Icons.push_pin),
+                title: Text(isPinned == 1 ? 'Unpin from Top' : 'Pin to Top'),
+                onTap: () async {
+                  HapticFeedback.lightImpact();
+                  await DatabaseHelper.instance.togglePinBook(bookId, isPinned == 0);
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  _refreshBooks();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Rename Book'),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  Navigator.pop(sheetContext);
+                  _showEditBookDialog(bookId, currentName);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: AppConstants.expenseRed),
+                title: const Text('Delete Book', style: TextStyle(color: AppConstants.expenseRed)),
+                onTap: () async {
+                  HapticFeedback.heavyImpact();
+                  await DatabaseHelper.instance.deleteBook(bookId);
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  _refreshBooks();
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildCardGroup({required List<Widget> children, required bool isDark, required bool isSignature}) {
+  void _showSmsSuggestionsSheet() {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            if (_smsSuggestions.isEmpty) {
+              return const SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.all(32.0),
+                  child: Center(child: Text('All detected SMS transactions have been reviewed!')),
+                ),
+              );
+            }
+            return SafeArea(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 12),
+                    Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Detected Bank SMS', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text('${_smsSuggestions.length} pending', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _smsSuggestions.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, idx) {
+                          final sms = _smsSuggestions[idx];
+                          final isIncome = sms.type == 'Income';
+                          return ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                            title: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(child: Text(sms.merchant, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                                Text(
+                                  '${isIncome ? '+' : '-'}${AppConstants.defaultCurrency}${sms.amount.toStringAsFixed(0)}',
+                                  style: TextStyle(fontWeight: FontWeight.bold, color: isIncome ? AppConstants.incomeGreen : AppConstants.expenseRed),
+                                ),
+                              ],
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 4),
+                                Text(sms.body, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12)),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    Text('${sms.paymentMode} • ${_formatDateStrict(sms.date.toIso8601String())}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                    const Spacer(),
+                                    TextButton(
+                                      onPressed: () async {
+                                        HapticFeedback.selectionClick();
+                                        await DatabaseHelper.instance.markSmsHandled(sms.smsId, 'dismissed');
+                                        setSheetState(() => _smsSuggestions.removeAt(idx));
+                                        setState(() {});
+                                      },
+                                      child: const Text('Dismiss', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                                    ),
+                                    FilledButton.tonal(
+                                      onPressed: () => _promptBookForSms(sms, () {
+                                        setSheetState(() => _smsSuggestions.removeAt(idx));
+                                      }),
+                                      child: const Text('Add to Book', style: TextStyle(fontSize: 12)),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _promptBookForSms(ParsedSmsTransaction sms, VoidCallback onAdded) async {
+    if (_booksData.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please create a Book first before adding SMS entries.')));
+      return;
+    }
+    int? chosenBookId = _booksData.length == 1 ? _booksData.first['id'] as int : null;
+
+    if (chosenBookId == null) {
+      chosenBookId = await showDialog<int>(
+        context: context,
+        builder: (dCtx) => SimpleDialog(
+          title: const Text('Select Book'),
+          children: _booksData.map((b) {
+            return SimpleDialogOption(
+              onPressed: () => Navigator.pop(dCtx, b['id'] as int),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(b['name'].toString(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+              ),
+            );
+          }).toList(),
+        ),
+      );
+    }
+
+    if (chosenBookId != null) {
+      HapticFeedback.mediumImpact();
+      await DatabaseHelper.instance.insertTransaction(
+        TransactionModel(
+          bookId: chosenBookId,
+          type: sms.type,
+          amount: sms.amount,
+          name: sms.merchant,
+          category: '',
+          notes: sms.body,
+          date: sms.date,
+          currency: AppConstants.defaultCurrency,
+          paymentMode: sms.paymentMode,
+        ),
+      );
+      await DatabaseHelper.instance.markSmsHandled(sms.smsId, 'added');
+      onAdded();
+      _refreshBooks();
+    }
+  }
+
+  // Strictly matches tagline width to "FinTrack" width
+  Widget _buildBrandHeader(bool isDark) {
+    final Color primaryText = isDark ? Colors.white : const Color(0xFF0F172A);
+    return IntrinsicWidth(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Fin', style: TextStyle(color: primaryText, fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5)),
+              Text('Track', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5)),
+            ],
+          ),
+          FittedBox(
+            fit: BoxFit.contain,
+            child: Text(
+              'YOUR PERSONAL FINANCE TRACKER',
+              style: TextStyle(
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBooksView(bool isDark) {
+    final scheme = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: _buildBrandHeader(isDark),
+        actions: [
+          PopupMenuButton<BookSort>(
+            icon: const Icon(Icons.sort_rounded),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            onSelected: (sort) {
+              HapticFeedback.selectionClick();
+              setState(() => _currentSort = sort);
+              _refreshBooks();
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: BookSort.updated, child: Text('Recently Updated')),
+              PopupMenuItem(value: BookSort.created, child: Text('Recently Created')),
+              PopupMenuItem(value: BookSort.aToZ, child: Text('Name (A to Z)')),
+              PopupMenuItem(value: BookSort.zToA, child: Text('Name (Z to A)')),
+            ],
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (_smsSuggestions.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Material(
+                color: scheme.primaryContainer.withOpacity(isDark ? 0.35 : 0.7),
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: _showSmsSuggestionsSheet,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    child: Row(
+                      children: [
+                        Icon(Icons.sms_outlined, size: 20, color: scheme.primary),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            '${_smsSuggestions.length} Bank SMS transaction${_smsSuggestions.length == 1 ? '' : 's'} found',
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                        ),
+                        Text('Review', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_ios_rounded, size: 12, color: scheme.primary),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _booksData.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.menu_book_rounded, size: 56, color: Colors.grey.withOpacity(0.4)),
+                            const SizedBox(height: 12),
+                            Text('No books yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[500])),
+                            const SizedBox(height: 4),
+                            Text('Tap "+ New Book" below to get started', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.only(bottom: 96, top: 8),
+                        itemCount: _booksData.length,
+                        itemBuilder: (context, index) {
+                          final book = _booksData[index];
+                          final bool isPinned = (book['isPinned'] ?? 0) == 1;
+                          final double netBalance = ((book['totalIn'] ?? 0) as num).toDouble() - ((book['totalOut'] ?? 0) as num).toDouble();
+                          final bool isNegative = netBalance < 0;
+
+                          final Color cardColor = isDark
+                              ? (isPinned ? const Color(0xFF181824) : AppConstants.cardDark)
+                              : (isPinned ? const Color(0xFFF1F5F9) : AppConstants.cardLight);
+
+                          final Color borderColor = isDark
+                              ? (isPinned ? scheme.primary.withOpacity(0.35) : AppConstants.borderDark)
+                              : (isPinned ? scheme.primary.withOpacity(0.25) : AppConstants.borderLight);
+
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                            child: Material(
+                              color: cardColor,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                side: BorderSide(color: borderColor, width: 1),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () {
+                                  HapticFeedback.lightImpact();
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => DashboardScreen(bookId: book['id'] as int, bookName: book['name'].toString()),
+                                    ),
+                                  ).then((_) => _refreshBooks());
+                                },
+                                onLongPress: () => _showBookOptions(book['id'] as int, book['name'].toString(), (book['isPinned'] ?? 0) as int),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(11),
+                                        decoration: BoxDecoration(
+                                          color: scheme.primary.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Icon(
+                                          isPinned ? Icons.push_pin_rounded : Icons.book_rounded,
+                                          color: scheme.primary,
+                                          size: 22,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 14),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              book['name'].toString(),
+                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Created ${_formatDateStrict(book['createdAt']?.toString())}  •  Updated ${_formatDateStrict(book['updatedAt']?.toString())}',
+                                              style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[500] : Colors.grey[600]),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 16,
+                                          color: isNegative ? AppConstants.expenseRed : AppConstants.incomeGreen,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddBookDialog,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New Book', style: TextStyle(fontWeight: FontWeight.w700)),
+      ),
+    );
+  }
+
+  Widget _buildSettingsCard({required List<Widget> children, required bool isDark}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
-        borderRadius: BorderRadius.circular(20),
+        color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
       ),
+      clipBehavior: Clip.antiAlias,
       child: Column(children: children),
     );
   }
 
-  Widget _buildSettingsView(BuildContext context, bool isDark, bool isSignature) {
+  Widget _buildSettingsView(BuildContext context, bool isDark) {
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final scheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : const Color(0xFFF2F2F7)),
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          _buildCardGroup(
-            isSignature: isSignature,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
+            child: Text('APPEARANCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+          ),
+          _buildSettingsCard(
             isDark: isDark,
             children: [
-              ListTile(
-                leading: Icon(Icons.palette_outlined, color: isSignature ? AppConstants.primaryColor : Colors.blue),
-                title: Text('Signature Theme', style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
-                subtitle: Text('Toggle standard Material You', style: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
-                trailing: Switch(
-                  value: isSignature,
-                  activeColor: isSignature ? AppConstants.primaryColor : Colors.blue,
-                  onChanged: (val) {
-                    HapticFeedback.lightImpact();
-                    themeProvider.toggleTheme();
-                  },
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Theme Mode', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<AppThemeChoice>(
+                        segments: const [
+                          ButtonSegment(value: AppThemeChoice.system, icon: Icon(Icons.brightness_auto_outlined, size: 18), label: Text('Auto')),
+                          ButtonSegment(value: AppThemeChoice.light, icon: Icon(Icons.light_mode_outlined, size: 18), label: Text('Light')),
+                          ButtonSegment(value: AppThemeChoice.dark, icon: Icon(Icons.dark_mode_outlined, size: 18), label: Text('AMOLED')),
+                        ],
+                        selected: {themeProvider.themeChoice},
+                        onSelectionChanged: (selection) {
+                          HapticFeedback.selectionClick();
+                          themeProvider.setThemeChoice(selection.first);
+                        },
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              const Divider(height: 1),
+              SwitchListTile(
+                secondary: Icon(Icons.color_lens_outlined, color: scheme.primary),
+                title: const Text('Material You Colors', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Use your Android wallpaper colors', style: TextStyle(fontSize: 12)),
+                value: themeProvider.useMaterialYou,
+                onChanged: (val) {
+                  HapticFeedback.lightImpact();
+                  themeProvider.toggleMaterialYou(val);
+                },
               ),
             ],
           ),
-          _buildCardGroup(
-            isSignature: isSignature,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+            child: Text('AUTOMATION & PRIVACY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+          ),
+          _buildSettingsCard(
+            isDark: isDark,
+            children: [
+              SwitchListTile(
+                secondary: Icon(Icons.sms_outlined, color: scheme.primary),
+                title: const Text('Smart SMS Auto-Track', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Detect bank & UPI SMS locally on device to suggest entries (100% offline)', style: TextStyle(fontSize: 12)),
+                value: themeProvider.smsAutoTrack,
+                onChanged: (val) async {
+                  HapticFeedback.lightImpact();
+                  if (val) {
+                    final bool granted = await _smsChannel.invokeMethod('requestSmsPermission') ?? false;
+                    if (!granted) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('SMS permission is required to suggest bank transactions.')),
+                        );
+                      }
+                      return;
+                    }
+                  }
+                  await themeProvider.setSmsAutoTrack(val);
+                  await _scanSmsIfEnabled();
+                },
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+            child: Text('CLOUD BACKUP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+          ),
+          _buildSettingsCard(
             isDark: isDark,
             children: [
               ListTile(
-                leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
-                title: Text('Google Drive Backup', style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
-                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                leading: Icon(Icons.cloud_upload_outlined, color: scheme.primary),
+                title: const Text('Google Drive Backup', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drive API Integration Next')));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google Drive OAuth setup ready for configuration.')));
                 },
               ),
-              Divider(height: 1, indent: 50, color: isSignature || isDark ? Colors.grey[800] : Colors.grey[200]),
+              const Divider(height: 1),
               ListTile(
-                leading: const Icon(Icons.cloud_download_outlined, color: Colors.blue),
-                title: Text('Restore from Drive', style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
-                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                leading: Icon(Icons.cloud_download_outlined, color: scheme.primary),
+                title: const Text('Restore from Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drive API Integration Next')));
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google Drive OAuth setup ready for configuration.')));
                 },
               ),
             ],
@@ -335,24 +742,25 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-    final isSignature = themeProvider.themeMode == AppThemeMode.glassmorphic;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
     return Scaffold(
-      body: _selectedIndex == 0 ? _buildBooksView(isDark, isSignature) : _buildSettingsView(context, isDark, isSignature),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        backgroundColor: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
-        selectedItemColor: isSignature ? AppConstants.primaryColor : Colors.blue,
-        unselectedItemColor: Colors.grey,
-        onTap: (index) {
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        child: _selectedIndex == 0
+            ? KeyedSubtree(key: const ValueKey('books'), child: _buildBooksView(isDark))
+            : KeyedSubtree(key: const ValueKey('settings'), child: _buildSettingsView(context, isDark)),
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        backgroundColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+        elevation: 0,
+        onDestinationSelected: (index) {
           HapticFeedback.selectionClick();
           setState(() => _selectedIndex = index);
         },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.book), label: 'Books'),
-          BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.book_outlined), selectedIcon: Icon(Icons.book_rounded), label: 'Books'),
+          NavigationDestination(icon: Icon(Icons.settings_outlined), selectedIcon: Icon(Icons.settings_rounded), label: 'Settings'),
         ],
       ),
     );
