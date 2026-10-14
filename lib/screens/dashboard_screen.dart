@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../data/database_helper.dart';
 import '../data/transaction_model.dart';
 import '../core/constants.dart';
+import '../theme/theme_provider.dart';
 import 'add_transaction_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -65,10 +67,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await Printing.sharePdf(bytes: await pdf.save(), filename: '${widget.bookName}_ledger.pdf');
   }
 
-  void _showTransactionOptions(TransactionModel tx) {
+  void _showTransactionOptions(TransactionModel tx, bool isSignature) {
     HapticFeedback.selectionClick();
     showModalBottomSheet(
       context: context,
+      backgroundColor: isSignature ? AppConstants.surfaceDark : Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetContext) => SafeArea(
         child: Column(
@@ -76,7 +79,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Delete Transaction'),
+              title: const Text('Delete Transaction', style: TextStyle(color: Colors.red)),
               onTap: () async {
                 HapticFeedback.heavyImpact();
                 await DatabaseHelper.instance.deleteTransaction(tx.id!, widget.bookId);
@@ -96,26 +99,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isSignature = themeProvider.themeMode == AppThemeMode.glassmorphic;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     final totalIncome = _calculateTotal('Income');
     final totalExpenses = _calculateTotal('Expense');
     final totalBalance = totalIncome - totalExpenses;
     final bool isNegative = totalBalance < 0;
 
     return Scaffold(
-      backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
+      backgroundColor: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : const Color(0xFFF2F2F7)),
       appBar: AppBar(
         title: Text(widget.bookName),
-        actions: [IconButton(icon: Icon(Icons.picture_as_pdf, color: isDark ? Colors.white : Colors.black), onPressed: _exportPDF)],
+        actions: [IconButton(icon: Icon(Icons.picture_as_pdf, color: isSignature || isDark ? Colors.white : Colors.black), onPressed: _exportPDF)],
       ),
       body: Column(
         children: [
-          // Reverted, Clean Header Stats Card
           Container(
             margin: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 8),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: isDark ? AppConstants.surfaceDark : Colors.white, 
+              color: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white), 
               borderRadius: BorderRadius.circular(20)
             ),
             child: Column(
@@ -123,10 +128,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Net Balance', style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[800], fontSize: 16)),
+                    Text('Net Balance', style: TextStyle(color: isSignature || isDark ? Colors.grey[300] : Colors.grey[800], fontSize: 16)),
                     Text(
                       '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${totalBalance.abs().toStringAsFixed(0)}',
-                      style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 22),
+                      style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 22),
                     ),
                   ],
                 ),
@@ -134,7 +139,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total In (+)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
+                    Text('Total In (+)', style: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
                     Text('${AppConstants.defaultCurrency}${totalIncome.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFF328D4D), fontWeight: FontWeight.bold, fontSize: 14)),
                   ],
                 ),
@@ -142,7 +147,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total Out (-)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
+                    Text('Total Out (-)', style: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 14)),
                     Text('${AppConstants.defaultCurrency}${totalExpenses.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFFD33636), fontWeight: FontWeight.bold, fontSize: 14)),
                   ],
                 ),
@@ -150,12 +155,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           
-          // Subtle Entry Count
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
               'Showing ${_transactions.length} ${_transactions.length == 1 ? 'entry' : 'entries'}',
-              style: TextStyle(color: isDark ? Colors.grey[600] : Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w500),
+              style: TextStyle(color: isSignature || isDark ? Colors.grey[600] : Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w500),
             ),
           ),
           
@@ -169,7 +173,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                   child: Material(
-                    color: isDark ? AppConstants.surfaceDark : Colors.white,
+                    color: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
                     borderRadius: BorderRadius.circular(16),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
@@ -177,7 +181,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         HapticFeedback.lightImpact();
                         Navigator.push(context, MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: tx.type, existingTransaction: tx))).then((_) => _refreshTransactions());
                       },
-                      onLongPress: () => _showTransactionOptions(tx),
+                      onLongPress: () => _showTransactionOptions(tx, isSignature),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -186,7 +190,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(tx.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black)),
+                                Text(tx.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isSignature || isDark ? Colors.white : Colors.black)),
                                 Text('${AppConstants.defaultCurrency}${tx.amount.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: tx.type == 'Income' ? const Color(0xFF328D4D) : const Color(0xFFD33636))),
                               ],
                             ),
@@ -194,18 +198,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             Text(tx.category.isEmpty ? 'No Category' : tx.category, style: TextStyle(color: Colors.grey[500], fontSize: 12)),
                             const SizedBox(height: 12),
                             
-                            // Unified Footer Row
                             Row(
                               children: [
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(color: isDark ? Colors.grey[800] : Colors.grey[200], borderRadius: BorderRadius.circular(6)),
-                                  child: Text(tx.paymentMode, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? Colors.grey[300] : Colors.grey[700])),
+                                  decoration: BoxDecoration(color: isSignature || isDark ? Colors.grey[800] : Colors.grey[200], borderRadius: BorderRadius.circular(6)),
+                                  child: Text(tx.paymentMode, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isSignature || isDark ? Colors.grey[300] : Colors.grey[700])),
                                 ),
                                 const SizedBox(width: 8),
-                                Text(_formatDateTime(tx.date), style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[500] : Colors.grey[500])),
+                                Text(_formatDateTime(tx.date), style: TextStyle(fontSize: 11, color: isSignature || isDark ? Colors.grey[500] : Colors.grey[500])),
                                 const Spacer(),
-                                if (hasImage) Icon(Icons.attachment, size: 14, color: isDark ? Colors.grey[500] : Colors.grey[400]),
+                                if (hasImage) Icon(Icons.attachment, size: 14, color: isSignature || isDark ? Colors.grey[500] : Colors.grey[400]),
                               ],
                             )
                           ],
@@ -218,9 +221,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ),
           
-          // Fixed Bottom Buttons
           Container(
-            color: isDark ? AppConstants.backgroundDark : Colors.white,
+            color: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : Colors.white),
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
