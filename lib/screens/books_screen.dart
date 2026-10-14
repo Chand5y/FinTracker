@@ -126,7 +126,7 @@ class _BooksScreenState extends State<BooksScreen> {
               title: const Text('Rename Book'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                // Trigger rename dialog (Implementation identical to previous step)
+                _showEditBookDialog(bookId, currentName);
               },
             ),
             ListTile(
@@ -145,11 +145,43 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  void _showEditBookDialog(int bookId, String currentName) {
+    final TextEditingController nameController = TextEditingController(text: currentName);
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Rename Book'),
+        content: TextField(
+          controller: nameController,
+          decoration: InputDecoration(
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppConstants.primaryColor, foregroundColor: Colors.white),
+            onPressed: () async {
+              final text = nameController.text.trim();
+              if (text.isNotEmpty && text != currentName) {
+                await DatabaseHelper.instance.updateBookName(bookId, text);
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                _refreshBooks(); 
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBooksView(bool isDark) {
     return Scaffold(
       backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
       appBar: AppBar(
-        title: const Text(AppConstants.appName),
+        title: Image.asset('logo.png', height: 28), 
         actions: [
           PopupMenuButton<BookSort>(
             icon: Icon(Icons.sort, color: isDark ? Colors.white : Colors.black),
@@ -177,7 +209,6 @@ class _BooksScreenState extends State<BooksScreen> {
                 final double netBalance = (book['totalIn'] ?? 0).toDouble() - (book['totalOut'] ?? 0).toDouble();
                 final bool isNegative = netBalance < 0;
 
-                // Subtle distinct color for pinned books
                 Color cardColor = isDark 
                     ? (isPinned ? const Color(0xFF1A1A2E) : AppConstants.surfaceDark)
                     : (isPinned ? const Color(0xFFF0F4FF) : Colors.white);
@@ -237,12 +268,70 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  Widget _buildCardGroup({required List<Widget> children, required bool isDark}) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? AppConstants.surfaceDark : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(children: children),
+    );
+  }
+
   Widget _buildSettingsView(BuildContext context, bool isDark) {
-    // Settings UI is identical, but uses AppConstants.primaryColor and HapticFeedback.
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isModern = themeProvider.themeMode == AppThemeMode.glassmorphic;
+
     return Scaffold(
       backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
       appBar: AppBar(title: const Text('Settings')),
-      body: Center(child: Text('Settings Logic Here', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+      body: ListView(
+        children: [
+          _buildCardGroup(
+            isDark: isDark,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.palette_outlined, color: AppConstants.primaryColor),
+                title: Text('Signature Theme', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                subtitle: Text('Toggle standard Material You', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
+                trailing: Switch(
+                  value: isModern,
+                  activeColor: AppConstants.primaryColor,
+                  onChanged: (val) {
+                    HapticFeedback.lightImpact();
+                    themeProvider.toggleTheme();
+                  },
+                ),
+              ),
+            ],
+          ),
+          _buildCardGroup(
+            isDark: isDark,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
+                title: Text('Google Drive Backup', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drive API Integration Next')));
+                },
+              ),
+              Divider(height: 1, indent: 50, color: isDark ? Colors.grey[800] : Colors.grey[200]),
+              ListTile(
+                leading: const Icon(Icons.cloud_download_outlined, color: Colors.blue),
+                title: Text('Restore from Drive', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drive API Integration Next')));
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
