@@ -22,9 +22,13 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrack --org com.chandankumar .
 
-      - name: Inject SMS Permission & Native Kotlin SMS Reader
+      - name: Use Pre-Installed NDK & Inject SMS Reader
         run: |
+          INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
+          echo "Using pre-installed NDK: $INSTALLED_NDK"
+          sed -i "s/flutter.ndkVersion/\"$INSTALLED_NDK\"/g" android/app/build.gradle*
           sed -i 's/<application/<uses-permission android:name="android.permission.READ_SMS"\/>\n    <application/' android/app/src/main/AndroidManifest.xml
+          mkdir -p android/app/src/main/kotlin/com/chandankumar/fintrack
           cat << 'EOF' > android/app/src/main/kotlin/com/chandankumar/fintrack/MainActivity.kt
           package com.chandankumar.fintrack
 
