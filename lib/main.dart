@@ -83,12 +83,6 @@ class FintrackApp extends StatelessWidget {
           letterSpacing: -0.5,
         ),
       ),
-      pageTransitionsTheme: PageTransitionsTheme(
-        builders: {
-          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-        },
-      ),
     );
   }
 }
