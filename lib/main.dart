@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:dynamic_color/dynamic_color.dart';
 
 import 'theme/theme_provider.dart';
 import 'screens/books_screen.dart';
@@ -24,47 +24,70 @@ class FintrackApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeProvider>(
-      builder: (context, themeProvider, child) {
-        final isSignature = themeProvider.themeMode == AppThemeMode.glassmorphic;
+      builder: (context, themeProvider, _) {
+        return DynamicColorBuilder(
+          builder: (ColorScheme? lightDynamic, ColorScheme? darkDynamic) {
+            final bool useDynamic = themeProvider.useMaterialYou;
 
-        return MaterialApp(
-          title: AppConstants.appName,
-          debugShowCheckedModeBanner: false,
-          theme: isSignature 
-            ? _buildSignatureTheme()
-            : ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue), useMaterial3: true, textTheme: GoogleFonts.interTextTheme()),
-          darkTheme: isSignature
-            ? _buildSignatureTheme()
-            : ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.dark), useMaterial3: true, textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme)),
-          // Force Dark Mode if Signature Theme is active
-          themeMode: isSignature ? ThemeMode.dark : ThemeMode.system, 
-          home: const BooksScreen(), 
+            final ColorScheme lightScheme = (useDynamic && lightDynamic != null)
+                ? lightDynamic
+                : ColorScheme.fromSeed(
+                    seedColor: AppConstants.accentIndigo,
+                    brightness: Brightness.light,
+                    surface: AppConstants.cardLight,
+                  );
+
+            final ColorScheme darkScheme = (useDynamic && darkDynamic != null)
+                ? darkDynamic
+                : ColorScheme.fromSeed(
+                    seedColor: AppConstants.accentIndigo,
+                    brightness: Brightness.dark,
+                    surface: AppConstants.cardDark,
+                  );
+
+            return MaterialApp(
+              title: AppConstants.appName,
+              debugShowCheckedModeBanner: false,
+              themeMode: themeProvider.flutterThemeMode,
+              theme: _buildTheme(lightScheme, Brightness.light, useDynamic),
+              darkTheme: _buildTheme(darkScheme, Brightness.dark, useDynamic),
+              home: const BooksScreen(),
+            );
+          },
         );
-      }
+      },
     );
   }
 
-  ThemeData _buildSignatureTheme() {
+  ThemeData _buildTheme(ColorScheme scheme, Brightness brightness, bool useDynamic) {
+    final bool isDark = brightness == Brightness.dark;
+    final Color scaffoldBg = useDynamic
+        ? scheme.surface
+        : (isDark ? AppConstants.bgDark : AppConstants.bgLight);
+
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: AppConstants.backgroundDark,
-      colorScheme: const ColorScheme.dark(
-        primary: AppConstants.primaryColor,
-        surface: AppConstants.surfaceDark,
-        background: AppConstants.backgroundDark,
-      ),
-      textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
+      brightness: brightness,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: scaffoldBg,
       appBarTheme: AppBarTheme(
-        backgroundColor: Colors.transparent,
+        backgroundColor: scaffoldBg,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         centerTitle: false,
-        iconTheme: const IconThemeData(color: Colors.white),
-        titleTextStyle: GoogleFonts.inter(
-          color: Colors.white,
-          fontSize: 24,
-          fontWeight: FontWeight.bold,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF0F172A)),
+        titleTextStyle: TextStyle(
+          color: isDark ? Colors.white : const Color(0xFF0F172A),
+          fontSize: 22,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.5,
         ),
+      ),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+        },
       ),
     );
   }
