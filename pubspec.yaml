@@ -15,7 +15,6 @@ dependencies:
   path: ^1.8.3
   provider: ^6.1.1
   dynamic_color: ^1.6.5
-  google_fonts: ^6.1.0
   image_picker: ^1.0.4
   pdf: ^3.10.7
   printing: ^5.11.1
@@ -31,11 +30,8 @@ flutter_icons:
   android: "launcher_icon"
   ios: true
   image_path: "logo.png"
-  adaptive_icon_background: "#121212"
+  adaptive_icon_background: "#0B101E"
   adaptive_icon_foreground: "logo.png"
 
 flutter:
   uses-material-design: true
-  assets:
-    - logo.png
-    
