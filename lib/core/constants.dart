@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
 class AppConstants {
-  static const String appName = 'Fintrack';
+  static const String appName = 'FinTrack';
   static const String defaultCurrency = '₹';
   
-  static const Color primaryColor = Color(0xFF6366F1); 
-  static const Color surfaceDark = Color(0xFF121212); 
-  static const Color backgroundDark = Colors.black; 
+  // New Signature Navy & Gold Vibe
+  static const Color primaryColor = Color(0xFFC5A059); // Champagne Gold
+  static const Color backgroundDark = Color(0xFF0B101E); // Deep Navy Blue
+  static const Color surfaceDark = Color(0xFF161D2F); // Elevated Navy Card
 
   static const List<Map<String, String>> categories = [
     {'name': 'Food & Dining', 'emoji': '🍔'},
