@@ -60,23 +60,30 @@ class _BooksScreenState extends State<BooksScreen> {
     return "$month/$day/${date.year}";
   }
 
-  void _showAddBookDialog() {
+  void _showAddBookDialog(bool isSignature) {
     HapticFeedback.lightImpact();
     final TextEditingController nameController = TextEditingController();
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        backgroundColor: isSignature ? AppConstants.surfaceDark : null,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('New Book'),
+        title: Text('New Book', style: TextStyle(color: isSignature ? Colors.white : Colors.black)),
         content: TextField(
           controller: nameController,
           textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(labelText: 'Enter book name', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+          style: TextStyle(color: isSignature ? Colors.white : Colors.black),
+          decoration: InputDecoration(
+            labelText: 'Enter book name',
+            labelStyle: TextStyle(color: isSignature ? Colors.grey[400] : Colors.grey[700]),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? Colors.grey[700]! : Colors.grey[400]!)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isSignature ? AppConstants.primaryColor : Colors.blue)),
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text('Cancel', style: TextStyle(color: isSignature ? Colors.grey[400] : Colors.blue))),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppConstants.primaryColor, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: isSignature ? AppConstants.primaryColor : Colors.blue, foregroundColor: isSignature ? Colors.black : Colors.white),
             onPressed: () async {
               final text = nameController.text.trim();
               if (text.isNotEmpty) {
@@ -100,20 +107,21 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  void _showBookOptions(int bookId, String currentName, int isPinned) {
+  void _showBookOptions(int bookId, String currentName, int isPinned, bool isSignature) {
     HapticFeedback.selectionClick();
     showModalBottomSheet(
       context: context,
+      backgroundColor: isSignature ? AppConstants.surfaceDark : Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Padding(padding: const EdgeInsets.all(16.0), child: Text(currentName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-            const Divider(height: 1),
+            Padding(padding: const EdgeInsets.all(16.0), child: Text(currentName, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: isSignature ? Colors.white : Colors.black))),
+            Divider(height: 1, color: isSignature ? Colors.grey[800] : Colors.grey[300]),
             ListTile(
-              leading: Icon(isPinned == 1 ? Icons.push_pin_outlined : Icons.push_pin, color: AppConstants.primaryColor),
-              title: Text(isPinned == 1 ? 'Unpin Book' : 'Pin to Top'),
+              leading: Icon(isPinned == 1 ? Icons.push_pin_outlined : Icons.push_pin, color: isSignature ? AppConstants.primaryColor : Colors.blue),
+              title: Text(isPinned == 1 ? 'Unpin Book' : 'Pin to Top', style: TextStyle(color: isSignature ? Colors.white : Colors.black)),
               onTap: () async {
                 HapticFeedback.lightImpact();
                 await DatabaseHelper.instance.togglePinBook(bookId, isPinned == 0);
@@ -122,16 +130,8 @@ class _BooksScreenState extends State<BooksScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.edit, color: Colors.blue),
-              title: const Text('Rename Book'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _showEditBookDialog(bookId, currentName);
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.delete, color: Colors.red),
-              title: const Text('Delete Book'),
+              title: const Text('Delete Book', style: TextStyle(color: Colors.red)),
               onTap: () async {
                 HapticFeedback.heavyImpact();
                 await DatabaseHelper.instance.deleteBook(bookId);
@@ -145,55 +145,48 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  void _showEditBookDialog(int bookId, String currentName) {
-    final TextEditingController nameController = TextEditingController(text: currentName);
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Rename Book'),
-        content: TextField(
-          controller: nameController,
-          decoration: InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          ),
+  Widget _buildHeaderTypography(bool isSignature) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Row(
+          children: [
+            Text('Fin', style: TextStyle(color: isSignature ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 26)),
+            Text('Track', style: TextStyle(color: isSignature ? AppConstants.primaryColor : Colors.blue, fontWeight: FontWeight.bold, fontSize: 26)),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppConstants.primaryColor, foregroundColor: Colors.white),
-            onPressed: () async {
-              final text = nameController.text.trim();
-              if (text.isNotEmpty && text != currentName) {
-                await DatabaseHelper.instance.updateBookName(bookId, text);
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                _refreshBooks(); 
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+        Text(
+          'YOUR PERSONAL FINANCE TRACKER', 
+          style: TextStyle(
+            color: isSignature ? Colors.grey[400] : Colors.grey[600], 
+            fontSize: 8, 
+            letterSpacing: 1.5, 
+            fontWeight: FontWeight.w600
+          )
+        ),
+      ],
     );
   }
 
-  Widget _buildBooksView(bool isDark) {
+  Widget _buildBooksView(bool isDark, bool isSignature) {
     return Scaffold(
-      backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
+      backgroundColor: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : const Color(0xFFF2F2F7)),
       appBar: AppBar(
-        title: Image.asset('logo.png', height: 28), 
+        title: _buildHeaderTypography(isSignature), 
         actions: [
           PopupMenuButton<BookSort>(
-            icon: Icon(Icons.sort, color: isDark ? Colors.white : Colors.black),
+            icon: Icon(Icons.sort, color: isSignature ? Colors.white : (isDark ? Colors.white : Colors.black)),
+            color: isSignature ? AppConstants.surfaceDark : null,
             onSelected: (sort) {
               HapticFeedback.selectionClick();
               setState(() { _currentSort = sort; _refreshBooks(); });
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: BookSort.updated, child: Text('Recently Updated')),
-              const PopupMenuItem(value: BookSort.created, child: Text('Recently Created')),
-              const PopupMenuItem(value: BookSort.aToZ, child: Text('A to Z')),
-              const PopupMenuItem(value: BookSort.zToA, child: Text('Z to A')),
+              PopupMenuItem(value: BookSort.updated, child: Text('Recently Updated', style: TextStyle(color: isSignature ? Colors.white : null))),
+              PopupMenuItem(value: BookSort.created, child: Text('Recently Created', style: TextStyle(color: isSignature ? Colors.white : null))),
+              PopupMenuItem(value: BookSort.aToZ, child: Text('A to Z', style: TextStyle(color: isSignature ? Colors.white : null))),
+              PopupMenuItem(value: BookSort.zToA, child: Text('Z to A', style: TextStyle(color: isSignature ? Colors.white : null))),
             ],
           )
         ],
@@ -209,41 +202,45 @@ class _BooksScreenState extends State<BooksScreen> {
                 final double netBalance = (book['totalIn'] ?? 0).toDouble() - (book['totalOut'] ?? 0).toDouble();
                 final bool isNegative = netBalance < 0;
 
-                Color cardColor = isDark 
-                    ? (isPinned ? const Color(0xFF1A1A2E) : AppConstants.surfaceDark)
-                    : (isPinned ? const Color(0xFFF0F4FF) : Colors.white);
+                Color cardColor = isSignature 
+                    ? (isPinned ? const Color(0xFF1E283D) : AppConstants.surfaceDark)
+                    : (isDark 
+                        ? (isPinned ? const Color(0xFF2C2C2C) : const Color(0xFF1E1E1E))
+                        : (isPinned ? const Color(0xFFF0F4FF) : Colors.white));
+
+                Color textColor = isSignature || isDark ? Colors.white : Colors.black;
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   child: Material(
                     color: cardColor,
                     borderRadius: BorderRadius.circular(16),
-                    elevation: isDark ? 0 : 1,
+                    elevation: isSignature || isDark ? 0 : 1,
                     child: InkWell(
                       borderRadius: BorderRadius.circular(16),
                       onTap: () {
                         HapticFeedback.lightImpact();
                         Navigator.push(context, MaterialPageRoute(builder: (_) => DashboardScreen(bookId: book['id'], bookName: book['name']))).then((_) => _refreshBooks());
                       },
-                      onLongPress: () => _showBookOptions(book['id'], book['name'], book['isPinned']),
+                      onLongPress: () => _showBookOptions(book['id'], book['name'], book['isPinned'], isSignature),
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(color: AppConstants.primaryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                              child: Icon(isPinned ? Icons.push_pin : Icons.book, color: AppConstants.primaryColor),
+                              decoration: BoxDecoration(color: (isSignature ? AppConstants.primaryColor : Colors.blue).withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                              child: Icon(isPinned ? Icons.push_pin : Icons.book, color: isSignature ? AppConstants.primaryColor : Colors.blue),
                             ),
                             const SizedBox(width: 16),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(book['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black)),
+                                  Text(book['name'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: textColor)),
                                   const SizedBox(height: 4),
-                                  Text('Created: ${_formatDateStrict(DateTime.parse(book['createdAt']))}', style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[500] : Colors.grey[600])),
-                                  Text('Updated: ${_formatDateStrict(DateTime.parse(book['updatedAt']))}', style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[500] : Colors.grey[600])),
+                                  Text('Created: ${_formatDateStrict(DateTime.parse(book['createdAt']))}', style: TextStyle(fontSize: 11, color: isSignature || isDark ? Colors.grey[500] : Colors.grey[600])),
+                                  Text('Updated: ${_formatDateStrict(DateTime.parse(book['updatedAt']))}', style: TextStyle(fontSize: 11, color: isSignature || isDark ? Colors.grey[500] : Colors.grey[600])),
                                 ],
                               ),
                             ),
@@ -260,44 +257,44 @@ class _BooksScreenState extends State<BooksScreen> {
               },
             ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: AppConstants.primaryColor,
-        onPressed: _showAddBookDialog,
-        icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text('New Book', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        backgroundColor: isSignature ? AppConstants.primaryColor : Colors.blue,
+        onPressed: () => _showAddBookDialog(isSignature),
+        icon: Icon(Icons.add, color: isSignature ? Colors.black : Colors.white),
+        label: Text('New Book', style: TextStyle(color: isSignature ? Colors.black : Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }
 
-  Widget _buildCardGroup({required List<Widget> children, required bool isDark}) {
+  Widget _buildCardGroup({required List<Widget> children, required bool isDark, required bool isSignature}) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isDark ? AppConstants.surfaceDark : Colors.white,
+        color: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(children: children),
     );
   }
 
-  Widget _buildSettingsView(BuildContext context, bool isDark) {
+  Widget _buildSettingsView(BuildContext context, bool isDark, bool isSignature) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    final isModern = themeProvider.themeMode == AppThemeMode.glassmorphic;
 
     return Scaffold(
-      backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
+      backgroundColor: isSignature ? AppConstants.backgroundDark : (isDark ? Colors.black : const Color(0xFFF2F2F7)),
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
           _buildCardGroup(
+            isSignature: isSignature,
             isDark: isDark,
             children: [
               ListTile(
-                leading: const Icon(Icons.palette_outlined, color: AppConstants.primaryColor),
-                title: Text('Signature Theme', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
-                subtitle: Text('Toggle standard Material You', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
+                leading: Icon(Icons.palette_outlined, color: isSignature ? AppConstants.primaryColor : Colors.blue),
+                title: Text('Signature Theme', style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                subtitle: Text('Toggle standard Material You', style: TextStyle(color: isSignature || isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 12)),
                 trailing: Switch(
-                  value: isModern,
-                  activeColor: AppConstants.primaryColor,
+                  value: isSignature,
+                  activeColor: isSignature ? AppConstants.primaryColor : Colors.blue,
                   onChanged: (val) {
                     HapticFeedback.lightImpact();
                     themeProvider.toggleTheme();
@@ -307,21 +304,22 @@ class _BooksScreenState extends State<BooksScreen> {
             ],
           ),
           _buildCardGroup(
+            isSignature: isSignature,
             isDark: isDark,
             children: [
               ListTile(
                 leading: const Icon(Icons.cloud_upload_outlined, color: Colors.blue),
-                title: Text('Google Drive Backup', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                title: Text('Google Drive Backup', style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
                 trailing: const Icon(Icons.chevron_right, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drive API Integration Next')));
                 },
               ),
-              Divider(height: 1, indent: 50, color: isDark ? Colors.grey[800] : Colors.grey[200]),
+              Divider(height: 1, indent: 50, color: isSignature || isDark ? Colors.grey[800] : Colors.grey[200]),
               ListTile(
                 leading: const Icon(Icons.cloud_download_outlined, color: Colors.blue),
-                title: Text('Restore from Drive', style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
+                title: Text('Restore from Drive', style: TextStyle(color: isSignature || isDark ? Colors.white : Colors.black, fontWeight: FontWeight.w500)),
                 trailing: const Icon(Icons.chevron_right, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
@@ -337,13 +335,16 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final themeProvider = Provider.of<ThemeProvider>(context);
+    final isSignature = themeProvider.themeMode == AppThemeMode.glassmorphic;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      body: _selectedIndex == 0 ? _buildBooksView(isDark) : _buildSettingsView(context, isDark),
+      body: _selectedIndex == 0 ? _buildBooksView(isDark, isSignature) : _buildSettingsView(context, isDark, isSignature),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
-        backgroundColor: isDark ? AppConstants.surfaceDark : Colors.white,
-        selectedItemColor: AppConstants.primaryColor,
+        backgroundColor: isSignature ? AppConstants.surfaceDark : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+        selectedItemColor: isSignature ? AppConstants.primaryColor : Colors.blue,
         unselectedItemColor: Colors.grey,
         onTap: (index) {
           HapticFeedback.selectionClick();
