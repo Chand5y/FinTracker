@@ -1,12 +1,12 @@
 class TransactionModel {
   final int? id;
-  final int bookId; // Links to the Book
-  final String type; // 'Expense', 'Income'
+  final int bookId;
+  final String type;
   final double amount;
-  final String name; 
+  final String name;
   final String category;
-  final String? notes;
-  final String? imagePath;
+  final String notes;
+  final String imagePath;
   final DateTime date;
   final String currency;
   final String paymentMode;
@@ -18,8 +18,8 @@ class TransactionModel {
     required this.amount,
     required this.name,
     required this.category,
-    this.notes,
-    this.imagePath,
+    this.notes = '',
+    this.imagePath = '',
     required this.date,
     required this.currency,
     required this.paymentMode,
@@ -47,12 +47,12 @@ class TransactionModel {
       bookId: map['bookId'],
       type: map['type'],
       amount: map['amount'],
-      name: map['name'] ?? 'Transaction',
-      category: map['category'],
-      notes: map['notes'],
-      imagePath: map['imagePath'],
+      name: map['name'],
+      category: map['category'] ?? '',
+      notes: map['notes'] ?? '',
+      imagePath: map['imagePath'] ?? '',
       date: DateTime.parse(map['date']),
-      currency: map['currency'],
+      currency: map['currency'] ?? '₹',
       paymentMode: map['paymentMode'] ?? 'Cash',
     );
   }
