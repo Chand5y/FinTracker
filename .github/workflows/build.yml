@@ -10,7 +10,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      # Explicitly install Java 17 to fix the JVM 11 error
       - uses: actions/setup-java@v3
         with:
           distribution: 'zulu'
@@ -24,6 +23,10 @@ jobs:
         run: flutter create --project-name fintrack --org com.chandankumar .
         
       - run: flutter pub get
+      
+      - name: Generate App Icon
+        run: dart run flutter_launcher_icons
+        
       - run: flutter build apk --release
       
       - name: Upload APK
@@ -31,4 +34,3 @@ jobs:
         with:
           name: fintrack-release
           path: build/app/outputs/flutter-apk/app-release.apk
-          
