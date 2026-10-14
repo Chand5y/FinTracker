@@ -4,10 +4,9 @@ class AppConstants {
   static const String appName = 'Fintrack';
   static const String defaultCurrency = '₹';
   
-  // Signature Vibe Colors
-  static const Color primaryColor = Color(0xFF6366F1); // Vibrant, modern Indigo
-  static const Color surfaceDark = Color(0xFF121212); // True AMOLED Elevated Card
-  static const Color backgroundDark = Colors.black; // True AMOLED Pitch Black
+  static const Color primaryColor = Color(0xFF6366F1); 
+  static const Color surfaceDark = Color(0xFF121212); 
+  static const Color backgroundDark = Colors.black; 
 
   static const List<Map<String, String>> categories = [
     {'name': 'Food & Dining', 'emoji': '🍔'},
@@ -22,6 +21,11 @@ class AppConstants {
     {'name': 'Lent to Someone', 'emoji': '🤝'},
     {'name': 'Repayment Received', 'emoji': '✅'},
     {'name': 'Miscellaneous', 'emoji': '📦'},
+  ];
+
+  static const List<String> paymentModes = [
+    'Cash', 'Online', 'Credit Card', 'Debit Card', 
+    'GPay', 'Paytm', 'SuperMoney', 'WhatsApp', 'Bhim'
   ];
 
   static const List<String> availableCurrencies = ['₹', '\$', '€', '£', '¥', 'A\$', 'C\$'];
