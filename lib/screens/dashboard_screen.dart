@@ -90,6 +90,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final totalIncome = _calculateTotal('Income');
     final totalExpenses = _calculateTotal('Expense');
     final totalBalance = totalIncome - totalExpenses;
+    
+    final bool isNegative = totalBalance < 0;
+    
+    // Dynamic Header Colors
+    Color headerColor = isDark 
+        ? (isNegative ? const Color(0xFF311313) : const Color(0xFF132D1A))
+        : (isNegative ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9));
 
     return Scaffold(
       backgroundColor: isDark ? AppConstants.backgroundDark : const Color(0xFFF2F2F7),
@@ -101,11 +108,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       body: Column(
         children: [
-          // Header Stats Card
+          // Dynamic Header Stats Card
           Container(
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: isDark ? AppConstants.surfaceDark : Colors.white, borderRadius: BorderRadius.circular(20)),
+            decoration: BoxDecoration(color: headerColor, borderRadius: BorderRadius.circular(20)),
             child: Column(
               children: [
                 Row(
@@ -113,7 +120,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     Text('Net Balance', style: TextStyle(color: isDark ? Colors.grey[300] : Colors.grey[800], fontSize: 16)),
                     Text(
-                      '${totalBalance < 0 ? '-' : ''}${AppConstants.defaultCurrency}${totalBalance.abs().toStringAsFixed(0)}',
+                      '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${totalBalance.abs().toStringAsFixed(0)}',
                       style: TextStyle(color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold, fontSize: 22),
                     ),
                   ],
