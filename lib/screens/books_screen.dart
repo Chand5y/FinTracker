@@ -53,7 +53,6 @@ class _BooksScreenState extends State<BooksScreen> {
     }
     if (!mounted) return;
 
-    // Schedule daily 10:00 PM (or user-customized) notification reminder
     try {
       await _smsChannel.invokeMethod('scheduleDailyReminder', {
         'enabled': themeProvider.dailyReminderEnabled,
@@ -62,10 +61,8 @@ class _BooksScreenState extends State<BooksScreen> {
       });
     } catch (_) {}
 
-    // Perform daily auto-backup if past 12:00 AM midnight
     await _checkAndRunDailyAutoBackup();
 
-    // Schedule timer for the next 12:05 AM midnight while app is in memory
     final now = DateTime.now();
     final nextMidnight = DateTime(now.year, now.month, now.day + 1, 0, 5);
     _midnightBackupTimer?.cancel();
@@ -77,6 +74,10 @@ class _BooksScreenState extends State<BooksScreen> {
   Future<void> _checkAndRunDailyAutoBackup() async {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     if (themeProvider.driveAccount.isEmpty) return;
+
+    // Never overwrite an existing cloud backup with an empty database!
+    final books = await DatabaseHelper.instance.getBooksWithBalances();
+    if (books.isEmpty) return;
 
     final now = DateTime.now();
     final String todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
@@ -179,10 +180,11 @@ class _BooksScreenState extends State<BooksScreen> {
     return AppConstants.formatOrdinalDateTime(date);
   }
 
-  void _showAddBookDialog() {
+  /// Opens the Create New Book dialog and returns the newly created book's ID (or null if cancelled)
+  Future<int?> _showAddBookDialog() async {
     HapticFeedback.lightImpact();
     final TextEditingController nameController = TextEditingController();
-    showDialog(
+    return showDialog<int>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -198,7 +200,7 @@ class _BooksScreenState extends State<BooksScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
+            onPressed: () => Navigator.pop(dialogContext, null),
             child: const Text('Cancel'),
           ),
           FilledButton(
@@ -206,7 +208,7 @@ class _BooksScreenState extends State<BooksScreen> {
               final text = nameController.text.trim();
               if (text.isEmpty) return;
               final now = DateTime.now();
-              final result = await DatabaseHelper.instance.insertBook(
+              final int result = await DatabaseHelper.instance.insertBook(
                 BookModel(name: text, createdAt: now, updatedAt: now),
               );
               if (result == -1) {
@@ -218,8 +220,8 @@ class _BooksScreenState extends State<BooksScreen> {
                 }
               } else {
                 HapticFeedback.mediumImpact();
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                _refreshBooks();
+                await _refreshBooks();
+                if (dialogContext.mounted) Navigator.pop(dialogContext, result);
               }
             },
             child: const Text('Create'),
@@ -272,7 +274,6 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // Long-press Book menu with Share as PDF and Export & Save as PDF
   void _showBookOptions(int bookId, String currentName, int isPinned) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
@@ -360,6 +361,39 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  Future<bool> _confirmDismissAllSms(int count) async {
+    HapticFeedback.mediumImpact();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: AppConstants.expenseRed),
+            SizedBox(width: 10),
+            Expanded(child: Text('Dismiss All SMS?', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18))),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to dismiss all $count pending SMS transactions?\n\nOnce dismissed, these messages will be permanently removed from suggestions and cannot be added from this tab again. Only new future bank SMS messages will appear.',
+          style: const TextStyle(fontSize: 13.5, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppConstants.expenseRed, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: const Text('Dismiss All'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
   void _showSmsSuggestionsSheet() {
     HapticFeedback.lightImpact();
     showModalBottomSheet(
@@ -379,19 +413,39 @@ class _BooksScreenState extends State<BooksScreen> {
             }
             return SafeArea(
               child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.78),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: 12),
                     Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2))),
                     Padding(
-                      padding: const EdgeInsets.all(16.0),
+                      padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Detected Bank SMS', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          Text('${_smsSuggestions.length} pending', style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Detected Bank SMS', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                Text('${_smsSuggestions.length} pending', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                              ],
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: () async {
+                              final bool proceed = await _confirmDismissAllSms(_smsSuggestions.length);
+                              if (!proceed) return;
+                              HapticFeedback.heavyImpact();
+                              final ids = _smsSuggestions.map((s) => s.smsId).toList();
+                              await DatabaseHelper.instance.markMultipleSmsHandled(ids, 'dismissed');
+                              setSheetState(() => _smsSuggestions.clear());
+                              if (mounted) setState(() {});
+                              if (sheetContext.mounted) Navigator.pop(sheetContext);
+                            },
+                            icon: const Icon(Icons.delete_sweep_outlined, size: 18, color: AppConstants.expenseRed),
+                            label: const Text('Dismiss All', style: TextStyle(color: AppConstants.expenseRed, fontWeight: FontWeight.w700, fontSize: 13)),
+                          ),
                         ],
                       ),
                     ),
@@ -459,33 +513,61 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  // If no books exist yet, immediately opens the Create New Book dialog and proceeds straight to adding the SMS entry
   Future<void> _promptBookAndEditSms(ParsedSmsTransaction sms, VoidCallback onAdded) async {
-    if (_booksData.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please create a Book first before adding SMS entries.')));
-      return;
-    }
-    int? chosenBookId = _booksData.length == 1 ? _booksData.first['id'] as int : null;
+    int? chosenBookId;
 
-    if (chosenBookId == null) {
+    if (_booksData.isEmpty) {
+      chosenBookId = await _showAddBookDialog();
+      if (chosenBookId == null) return;
+    } else if (_booksData.length == 1) {
+      chosenBookId = _booksData.first['id'] as int;
+    } else {
       chosenBookId = await showDialog<int>(
         context: context,
         builder: (dCtx) => SimpleDialog(
-          title: const Text('Select Book'),
+          title: const Text('Select Book', style: TextStyle(fontWeight: FontWeight.w700)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          children: _booksData.map((b) {
-            return SimpleDialogOption(
-              onPressed: () => Navigator.pop(dCtx, b['id'] as int),
+          children: [
+            ..._booksData.map((b) {
+              return SimpleDialogOption(
+                onPressed: () => Navigator.pop(dCtx, b['id'] as int),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Icon(Icons.book_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text(b['name'].toString(), style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+                ),
+              );
+            }),
+            const Divider(),
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dCtx, -999),
               child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(b['name'].toString(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(Icons.add_circle_outline_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 10),
+                    Text('Create New Book', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.primary)),
+                  ],
+                ),
               ),
-            );
-          }).toList(),
+            ),
+          ],
         ),
       );
+
+      if (chosenBookId == -999) {
+        chosenBookId = await _showAddBookDialog();
+      }
     }
 
-    if (chosenBookId != null && mounted) {
+    if (chosenBookId != null && chosenBookId > 0 && mounted) {
       HapticFeedback.lightImpact();
       final prefilledDraft = TransactionModel(
         id: null,
@@ -520,7 +602,6 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  // Prompts the native Android Google Account chooser & Drive permission dialog
   Future<String?> _ensureGoogleDriveAccount(ThemeProvider themeProvider, {bool forceChoose = false}) async {
     if (themeProvider.driveAccount.isNotEmpty && !forceChoose) {
       return themeProvider.driveAccount;
@@ -541,7 +622,7 @@ class _BooksScreenState extends State<BooksScreen> {
           ],
         ),
         content: Text(
-          'FinTrax wants permission to store and restore your encrypted ledger backups in Google Drive for:\n\n$selectedEmail\n\n• Automatic daily backup after 12:00 AM\n• Private app-only Drive folder',
+          'FinTrax wants permission to store and restore your ledger backups in Google Drive for:\n\n$selectedEmail\n\n• Automatic daily backup after 12:00 AM\n• Private app-only Drive sync',
           style: const TextStyle(fontSize: 13.5, height: 1.4),
         ),
         actions: [
@@ -553,6 +634,17 @@ class _BooksScreenState extends State<BooksScreen> {
 
     if (granted == true) {
       await themeProvider.setDriveAccount(selectedEmail);
+      // Check if an existing backup is already stored for this Google account and sync its timestamp
+      try {
+        final String? existingJson = await _smsChannel.invokeMethod('checkDriveBackup', {'account': selectedEmail});
+        if (existingJson != null && existingJson.isNotEmpty) {
+          final Map<String, dynamic> decoded = jsonDecode(existingJson) as Map<String, dynamic>;
+          final String expIso = decoded['exportedAt']?.toString() ?? '';
+          if (expIso.isNotEmpty) {
+            await themeProvider.recordBackupSuccess(isoTimestamp: expIso, dayKey: themeProvider.lastAutoBackupDay);
+          }
+        }
+      } catch (_) {}
       return selectedEmail;
     }
     return null;
@@ -619,11 +711,13 @@ class _BooksScreenState extends State<BooksScreen> {
     }
 
     String backupTimeFormatted = 'Unknown date';
+    String exportedIso = '';
     int bookCount = 0;
     int txCount = 0;
     try {
       final Map<String, dynamic> decoded = jsonDecode(jsonContent) as Map<String, dynamic>;
-      final DateTime? expDate = DateTime.tryParse(decoded['exportedAt']?.toString() ?? '');
+      exportedIso = decoded['exportedAt']?.toString() ?? '';
+      final DateTime? expDate = DateTime.tryParse(exportedIso);
       if (expDate != null) {
         backupTimeFormatted = AppConstants.formatOrdinalDateTime(expDate);
       }
@@ -649,6 +743,11 @@ class _BooksScreenState extends State<BooksScreen> {
 
     if (confirmRestore == true) {
       final int restored = await DatabaseHelper.instance.importDatabaseJson(jsonContent);
+      if (exportedIso.isNotEmpty) {
+        final now = DateTime.now();
+        final String todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+        await themeProvider.recordBackupSuccess(isoTimestamp: exportedIso, dayKey: todayKey);
+      }
       await _refreshBooks();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -919,16 +1018,18 @@ class _BooksScreenState extends State<BooksScreen> {
                                                   ),
                                                 ),
                                                 const SizedBox(width: 8),
+                                                // Compact "Created on :" badge without extending pill width
                                                 Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
                                                   decoration: BoxDecoration(
                                                     color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
                                                     borderRadius: BorderRadius.circular(6),
                                                   ),
                                                   child: Text(
-                                                    'Created ${_formatCreatedDate(book['createdAt']?.toString())}',
+                                                    'Created on : ${_formatCreatedDate(book['createdAt']?.toString())}',
                                                     style: TextStyle(
-                                                      fontSize: 9.5,
+                                                      fontSize: 8.5,
+                                                      letterSpacing: -0.2,
                                                       fontWeight: FontWeight.w500,
                                                       color: isDark ? Colors.grey[400] : Colors.grey[600],
                                                     ),
@@ -984,7 +1085,7 @@ class _BooksScreenState extends State<BooksScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _showAddBookDialog,
+        onPressed: () => _showAddBookDialog(),
         icon: const Icon(Icons.add_rounded),
         label: const Text('New Book', style: TextStyle(fontWeight: FontWeight.w700)),
       ),
@@ -996,7 +1097,7 @@ class _BooksScreenState extends State<BooksScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
         color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
       ),
       clipBehavior: Clip.antiAlias,
@@ -1004,33 +1105,41 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 4),
+      child: Text(
+        title,
+        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: Colors.grey[500]),
+      ),
+    );
+  }
+
+  // Clean, spacious, executive Settings view
   Widget _buildSettingsView(BuildContext context, bool isDark) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final scheme = Theme.of(context).colorScheme;
 
     final String lastBackupText = themeProvider.lastBackupIso.isEmpty
-        ? 'Never backed up'
+        ? 'Not backed up yet'
         : AppConstants.formatOrdinalDateTime(DateTime.tryParse(themeProvider.lastBackupIso) ?? DateTime.now());
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 32),
+        padding: const EdgeInsets.only(top: 4, bottom: 32),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
-            child: Text('APPEARANCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
-          ),
+          _buildSectionHeader('APPEARANCE'),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Theme Mode', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                    const SizedBox(height: 12),
+                    const Text('Theme Mode', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                    const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       child: SegmentedButton<AppThemeChoice>(
@@ -1067,9 +1176,10 @@ class _BooksScreenState extends State<BooksScreen> {
               ),
               const Divider(height: 1),
               SwitchListTile(
-                secondary: Icon(Icons.color_lens_outlined, color: scheme.primary),
-                title: const Text('Material You Colors', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Override signature Gold theme with wallpaper colors', style: TextStyle(fontSize: 12)),
+                dense: true,
+                secondary: Icon(Icons.palette_outlined, color: scheme.primary, size: 21),
+                title: const Text('Material You Colors', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                subtitle: const Text('Use wallpaper colors instead of Gold', style: TextStyle(fontSize: 11.5)),
                 value: themeProvider.useMaterialYou,
                 onChanged: (val) {
                   HapticFeedback.lightImpact();
@@ -1079,17 +1189,15 @@ class _BooksScreenState extends State<BooksScreen> {
             ],
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-            child: Text('SECURITY, REMINDERS & AUTOMATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
-          ),
+          _buildSectionHeader('PREFERENCES & SECURITY'),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               SwitchListTile(
-                secondary: Icon(Icons.fingerprint_rounded, color: scheme.primary),
-                title: const Text('App Lock (Fingerprint / Screen Lock)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Unlock FinTrax using your Fingerprint or phone lock screen', style: TextStyle(fontSize: 12)),
+                dense: true,
+                secondary: Icon(Icons.fingerprint_rounded, color: scheme.primary, size: 22),
+                title: const Text('Biometric App Lock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                subtitle: const Text('Unlock with Fingerprint or screen lock', style: TextStyle(fontSize: 11.5)),
                 value: themeProvider.appLockEnabled,
                 onChanged: (val) {
                   HapticFeedback.lightImpact();
@@ -1098,9 +1206,10 @@ class _BooksScreenState extends State<BooksScreen> {
               ),
               const Divider(height: 1),
               SwitchListTile(
-                secondary: Icon(Icons.sms_outlined, color: scheme.primary),
-                title: const Text('Smart SMS Auto-Track', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Detect bank & UPI SMS on device to suggest entries', style: TextStyle(fontSize: 12)),
+                dense: true,
+                secondary: Icon(Icons.sms_outlined, color: scheme.primary, size: 21),
+                title: const Text('Smart SMS Auto-Track', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                subtitle: const Text('Auto-detect bank & UPI SMS offline', style: TextStyle(fontSize: 11.5)),
                 value: themeProvider.smsAutoTrack,
                 onChanged: (val) async {
                   HapticFeedback.lightImpact();
@@ -1120,144 +1229,182 @@ class _BooksScreenState extends State<BooksScreen> {
                 },
               ),
               const Divider(height: 1),
-              SwitchListTile(
-                secondary: Icon(Icons.notifications_active_outlined, color: scheme.primary),
-                title: const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: Text(
-                  themeProvider.dailyReminderEnabled
-                      ? 'Reminds you daily at ${AppConstants.formatTimeOfDay(themeProvider.reminderHour, themeProvider.reminderMinute)} (includes SMS alerts)'
-                      : 'Daily reminder disabled',
-                  style: const TextStyle(fontSize: 12),
+              // Merged Daily Reminder Switch + Inline Tappable Time Chip
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    Icon(Icons.notifications_active_outlined, color: scheme.primary, size: 21),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                          const SizedBox(height: 2),
+                          Text(
+                            themeProvider.dailyReminderEnabled ? 'Includes daily SMS summary' : 'Reminders paused',
+                            style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (themeProvider.dailyReminderEnabled)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => _pickReminderTime(themeProvider),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: scheme.primary.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: scheme.primary.withOpacity(0.3)),
+                            ),
+                            child: Text(
+                              AppConstants.formatTimeOfDay(themeProvider.reminderHour, themeProvider.reminderMinute),
+                              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: scheme.primary),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Switch(
+                      value: themeProvider.dailyReminderEnabled,
+                      onChanged: (val) async {
+                        HapticFeedback.lightImpact();
+                        await themeProvider.setDailyReminder(enabled: val);
+                        await _smsChannel.invokeMethod('scheduleDailyReminder', {
+                          'enabled': val,
+                          'hour': themeProvider.reminderHour,
+                          'minute': themeProvider.reminderMinute,
+                        });
+                      },
+                    ),
+                  ],
                 ),
-                value: themeProvider.dailyReminderEnabled,
-                onChanged: (val) async {
-                  HapticFeedback.lightImpact();
-                  await themeProvider.setDailyReminder(enabled: val);
-                  await _smsChannel.invokeMethod('scheduleDailyReminder', {
-                    'enabled': val,
-                    'hour': themeProvider.reminderHour,
-                    'minute': themeProvider.reminderMinute,
-                  });
-                },
               ),
-              if (themeProvider.dailyReminderEnabled) ...[
-                const Divider(height: 1),
-                ListTile(
-                  leading: Icon(Icons.access_time_rounded, color: scheme.primary),
-                  title: const Text('Reminder Time', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
-                  subtitle: const Text('Tap to customize daily notification time', style: TextStyle(fontSize: 12)),
-                  trailing: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: scheme.primary.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      AppConstants.formatTimeOfDay(themeProvider.reminderHour, themeProvider.reminderMinute),
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: scheme.primary),
-                    ),
-                  ),
-                  onTap: () => _pickReminderTime(themeProvider),
-                ),
-              ],
             ],
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-            child: Text('GOOGLE DRIVE BACKUP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
-          ),
+          _buildSectionHeader('GOOGLE DRIVE SYNC'),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               ListTile(
-                leading: Icon(Icons.account_circle_outlined, color: scheme.primary),
+                dense: true,
+                leading: Icon(Icons.add_to_drive_rounded, color: scheme.primary, size: 22),
                 title: Text(
                   themeProvider.driveAccount.isEmpty ? 'Connect Google Account' : themeProvider.driveAccount,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                 ),
                 subtitle: Text(
                   themeProvider.driveAccount.isEmpty
-                      ? 'Select your logged-in Google account for Drive backup'
-                      : 'Last Backup: $lastBackupText\nAuto-Backup: Daily after 12:00 AM',
-                  style: const TextStyle(fontSize: 11.5, height: 1.35),
+                      ? 'Auto-backups daily after 12:00 AM'
+                      : 'Last: $lastBackupText  •  Auto: 12:00 AM',
+                  style: const TextStyle(fontSize: 11),
                 ),
-                isThreeLine: themeProvider.driveAccount.isNotEmpty,
                 trailing: TextButton(
                   onPressed: () => _ensureGoogleDriveAccount(themeProvider, forceChoose: true),
-                  child: Text(themeProvider.driveAccount.isEmpty ? 'Connect' : 'Switch'),
+                  child: Text(themeProvider.driveAccount.isEmpty ? 'Connect' : 'Switch', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                 ),
               ),
               const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.cloud_upload_outlined, color: scheme.primary),
-                title: const Text('Backup Now to Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Sync all books & entries directly to your Google Drive', style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                onTap: () => _handleDriveBackup(themeProvider),
-              ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(Icons.cloud_download_outlined, color: scheme.primary),
-                title: const Text('Restore from Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Check Drive for your backup and restore books', style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                onTap: () => _handleDriveRestore(themeProvider),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => _handleDriveBackup(themeProvider),
+                        icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                        label: const Text('Backup Now', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => _handleDriveRestore(themeProvider),
+                        icon: const Icon(Icons.cloud_download_outlined, size: 18),
+                        label: const Text('Restore', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
 
-          // Updated Privacy & Zero-Ads Assurance Note
+          // Clean, Structured Privacy & Zero-Ads Card
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: AppConstants.incomeGreen.withOpacity(isDark ? 0.12 : 0.08),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.3)),
+              color: AppConstants.incomeGreen.withOpacity(isDark ? 0.10 : 0.07),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.28)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.verified_user_outlined, color: AppConstants.incomeGreen, size: 20),
+                const Padding(
+                  padding: EdgeInsets.only(top: 2),
+                  child: Icon(Icons.verified_user_outlined, color: AppConstants.incomeGreen, size: 19),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    '100% Free, Offline & Ad-Free: FinTrax is completely free, never shows any ads, and never collects or shares your personal data for advertising. All SMS processing happens strictly offline on your device, and backups go only to your personal Google Drive.',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      height: 1.4,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.grey[300] : Colors.grey[800],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '100% Free • Offline • Zero Ads',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'FinTrax never shows ads and never collects or shares your data. SMS detection runs locally on your phone, and backups stay in your personal Google Drive.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.38,
+                          color: isDark ? Colors.grey[300] : Colors.grey[800],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
 
-          // Locked Developer Credits (No Edit button for users)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-            child: Text('DEVELOPER CREDITS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
-          ),
+          _buildSectionHeader('ABOUT & CREDITS'),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               const ListTile(
+                dense: true,
                 leading: CircleAvatar(
+                  radius: 18,
                   backgroundColor: AppConstants.iconNavy,
-                  child: Text('CK', style: TextStyle(color: AppConstants.goldAccent, fontWeight: FontWeight.w800, fontSize: 13)),
+                  child: Text('CK', style: TextStyle(color: AppConstants.goldAccent, fontWeight: FontWeight.w800, fontSize: 12)),
                 ),
-                title: Text(AppConstants.developerName, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                subtitle: Text(AppConstants.developerRole, style: TextStyle(fontSize: 12)),
+                title: Text(AppConstants.developerRole, style: TextStyle(fontSize: 11, color: Colors.grey)),
+                subtitle: Text(AppConstants.developerName, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
               ),
               const Divider(height: 1),
               ListTile(
-                leading: Icon(Icons.code_rounded, color: scheme.primary),
-                title: const Text('GitHub', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                subtitle: const Text('github.com/${AppConstants.defaultGithubId}', style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.grey),
+                dense: true,
+                leading: Icon(Icons.code_rounded, color: scheme.primary, size: 20),
+                title: const Text('GitHub', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                subtitle: const Text('github.com/${AppConstants.defaultGithubId}', style: TextStyle(fontSize: 11.5)),
+                trailing: const Icon(Icons.open_in_new_rounded, size: 16, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
                   _smsChannel.invokeMethod('openUrl', {'url': 'https://github.com/${AppConstants.defaultGithubId}'});
@@ -1265,10 +1412,11 @@ class _BooksScreenState extends State<BooksScreen> {
               ),
               const Divider(height: 1),
               ListTile(
-                leading: Icon(Icons.alternate_email_rounded, color: scheme.primary),
-                title: const Text('Contact Email', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                subtitle: const Text(AppConstants.defaultDeveloperEmail, style: TextStyle(fontSize: 12)),
-                trailing: const Icon(Icons.mail_outline_rounded, size: 18, color: Colors.grey),
+                dense: true,
+                leading: Icon(Icons.alternate_email_rounded, color: scheme.primary, size: 20),
+                title: const Text('Contact Email', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                subtitle: const Text(AppConstants.defaultDeveloperEmail, style: TextStyle(fontSize: 11.5)),
+                trailing: const Icon(Icons.mail_outline_rounded, size: 16, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
                   _smsChannel.invokeMethod('openUrl', {'url': 'mailto:${AppConstants.defaultDeveloperEmail}?subject=FinTrax%20Feedback'});
