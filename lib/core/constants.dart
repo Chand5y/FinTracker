@@ -8,7 +8,7 @@ class AppConstants {
   static const Color goldAccent = Color(0xFFC5A059);
   static const Color goldDarkText = Color(0xFF9E7B36);
   static const Color iconNavy = Color(0xFF111C30);
-  static const Color accentIndigo = Color(0xFFC5A059); // Alias for compatibility
+  static const Color accentIndigo = Color(0xFFC5A059);
 
   // Clean Light Palette
   static const Color bgLight = Color(0xFFF8FAFC);
@@ -40,9 +40,56 @@ class AppConstants {
   ];
 
   static const List<String> paymentModes = [
-    'Cash', 'Online', 'GPay', 'Paytm', 'SuperMoney', 
+    'Cash', 'Online', 'GPay', 'Paytm', 'SuperMoney',
     'WhatsApp', 'Bhim', 'Credit Card', 'Debit Card'
   ];
+
+  static const Map<String, String> paymentModeEmojis = {
+    'Cash': '💵',
+    'Online': '🌐',
+    'GPay': '📱',
+    'Paytm': '💙',
+    'SuperMoney': '⚡',
+    'WhatsApp': '💬',
+    'Bhim': '🇮🇳',
+    'Credit Card': '💳',
+    'Debit Card': '🏦',
+  };
+
+  static const List<String> _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+
+  static String _ordinalSuffix(int day) {
+    if (day >= 11 && day <= 13) return 'th';
+    switch (day % 10) {
+      case 1:
+        return 'st';
+      case 2:
+        return 'nd';
+      case 3:
+        return 'rd';
+      default:
+        return 'th';
+    }
+  }
+
+  /// Formats as: "1st Jan 2026" or "15th Oct 2026"
+  static String formatOrdinalDate(DateTime date) {
+    final int d = date.day;
+    final String month = _months[date.month - 1];
+    return '$d${_ordinalSuffix(d)} $month ${date.year}';
+  }
+
+  /// Formats as: "15th Oct 2026, 7:39 AM"
+  static String formatOrdinalDateTime(DateTime date) {
+    final String datePart = formatOrdinalDate(date);
+    final int hour = date.hour == 0 ? 12 : (date.hour > 12 ? date.hour - 12 : date.hour);
+    final String amPm = date.hour >= 12 ? 'PM' : 'AM';
+    final String min = date.minute.toString().padLeft(2, '0');
+    return '$datePart, $hour:$min $amPm';
+  }
 }
 
 class ParsedSmsTransaction {
