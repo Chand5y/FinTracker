@@ -51,7 +51,7 @@ jobs:
           echo "Using pre-installed NDK: $INSTALLED_NDK"
           sed -i "s/flutter.ndkVersion/\"$INSTALLED_NDK\"/g" android/app/build.gradle*
           sed -i 's/android:label="fintrax"/android:label="FinTrax"/g' android/app/src/main/AndroidManifest.xml
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="true" android:fullBackupOnly="true"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="false" android:fullBackupOnly="false"/' android/app/src/main/AndroidManifest.xml
           sed -i 's/<\/application>/    <receiver android:name=".ReminderReceiver" android:exported="false"\/>\n    <\/application>/' android/app/src/main/AndroidManifest.xml
           mkdir -p android/app/src/main/kotlin/com/chandsy/fintrax
 
@@ -209,219 +209,21 @@ jobs:
           package com.chandsy.fintrax
 
           import android.Manifest
-          import android.accounts.Account
-          import android.accounts.AccountManager
           import android.app.Activity
           import android.app.KeyguardManager
-          import android.app.backup.BackupManager
-          import android.content.ContentUris
-          import android.content.ContentValues
           import android.content.Context
           import android.content.Intent
           import android.content.pm.PackageManager
           import android.net.Uri
           import android.os.Build
-          import android.os.Environment
-          import android.provider.MediaStore
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
-          import org.json.JSONObject
-          import java.io.File
-          import java.net.HttpURLConnection
-          import java.net.URL
 
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "com.chandankumar.fintrack/sms"
-              private val DRIVE_SCOPE = "oauth2:https://www.googleapis.com/auth/drive.appdata"
-              private val CLOUD_FILE_NAME = "fintrax_cloud_backup.json"
-
               private var pendingResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
-              private var pendingDriveAction: (() -> Unit)? = null
-
-              private fun obtainDriveAccessToken(accountName: String, onToken: (String?) -> Unit) {
-                  Thread {
-                      try {
-                          val am = AccountManager.get(this)
-                          val account = Account(accountName, "com.google")
-                          val future = am.getAuthToken(account, DRIVE_SCOPE, null, false, null, null)
-                          val bundle = future.result
-                          val consentIntent = bundle.getParcelable<Intent>(AccountManager.KEY_INTENT)
-                          if (consentIntent != null) {
-                              pendingDriveAction = { obtainDriveAccessToken(accountName, onToken) }
-                              runOnUiThread { startActivityForResult(consentIntent, 1008) }
-                              return@Thread
-                          }
-                          val token = bundle.getString(AccountManager.KEY_AUTHTOKEN)
-                          onToken(token)
-                      } catch (e: Exception) {
-                          onToken(null)
-                      }
-                  }.start()
-              }
-
-              private fun findCloudBackupFileId(token: String): String? {
-                  val queryUrl = "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='$CLOUD_FILE_NAME'&fields=files(id,name,modifiedTime)&pageSize=1"
-                  val conn = (URL(queryUrl).openConnection() as HttpURLConnection).apply {
-                      requestMethod = "GET"
-                      setRequestProperty("Authorization", "Bearer $token")
-                      connectTimeout = 15000
-                      readTimeout = 15000
-                  }
-                  if (conn.responseCode == 200) {
-                      val resp = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                      val files = JSONObject(resp).optJSONArray("files")
-                      if (files != null && files.length() > 0) {
-                          return files.getJSONObject(0).optString("id", null)
-                      }
-                  }
-                  return null
-              }
-
-              private fun uploadToGoogleDriveCloud(token: String, jsonContent: String): Boolean {
-                  return try {
-                      val existingId = findCloudBackupFileId(token)
-                      if (!existingId.isNullOrEmpty()) {
-                          val updateUrl = "https://www.googleapis.com/upload/drive/v3/files/$existingId?uploadType=media"
-                          val conn = (URL(updateUrl).openConnection() as HttpURLConnection).apply {
-                              requestMethod = "PATCH"
-                              doOutput = true
-                              setRequestProperty("Authorization", "Bearer $token")
-                              setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                              connectTimeout = 20000
-                              readTimeout = 20000
-                          }
-                          conn.outputStream.use { it.write(jsonContent.toByteArray(Charsets.UTF_8)) }
-                          conn.responseCode in 200..299
-                      } else {
-                          val boundary = "FinTraxBoundary" + System.currentTimeMillis()
-                          val createUrl = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
-                          val conn = (URL(createUrl).openConnection() as HttpURLConnection).apply {
-                              requestMethod = "POST"
-                              doOutput = true
-                              setRequestProperty("Authorization", "Bearer $token")
-                              setRequestProperty("Content-Type", "multipart/related; boundary=$boundary")
-                              connectTimeout = 20000
-                              readTimeout = 20000
-                          }
-                          val metaJson = """{"name":"$CLOUD_FILE_NAME","parents":["appDataFolder"]}"""
-                          val bodyBuilder = StringBuilder()
-                          bodyBuilder.append("--$boundary\r\n")
-                          bodyBuilder.append("Content-Type: application/json; charset=UTF-8\r\n\r\n")
-                          bodyBuilder.append("$metaJson\r\n")
-                          bodyBuilder.append("--$boundary\r\n")
-                          bodyBuilder.append("Content-Type: application/json; charset=UTF-8\r\n\r\n")
-                          bodyBuilder.append("$jsonContent\r\n")
-                          bodyBuilder.append("--$boundary--\r\n")
-                          conn.outputStream.use { it.write(bodyBuilder.toString().toByteArray(Charsets.UTF_8)) }
-                          conn.responseCode in 200..299
-                      }
-                  } catch (e: Exception) {
-                      false
-                  }
-              }
-
-              private fun downloadFromGoogleDriveCloud(token: String): String? {
-                  return try {
-                      val fileId = findCloudBackupFileId(token) ?: return null
-                      val downloadUrl = "https://www.googleapis.com/drive/v3/files/$fileId?alt=media"
-                      val conn = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
-                          requestMethod = "GET"
-                          setRequestProperty("Authorization", "Bearer $token")
-                          connectTimeout = 20000
-                          readTimeout = 20000
-                      }
-                      if (conn.responseCode == 200) {
-                          conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                      } else {
-                          null
-                      }
-                  } catch (e: Exception) {
-                      null
-                  }
-              }
-
-              private fun getBackupFileName(account: String): String {
-                  return account.lowercase().replace(Regex("[^a-z0-9._-]"), "_") + "_fintrax_cloud.json"
-              }
-
-              private fun writePersistentBackup(account: String, jsonContent: String): Boolean {
-                  val fileName = getBackupFileName(account)
-                  var success = false
-
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      try {
-                          val resolver = contentResolver
-                          val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                          val projection = arrayOf(MediaStore.MediaColumns._ID)
-                          val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-                          val selectionArgs = arrayOf(fileName)
-
-                          resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-                              while (cursor.moveToNext()) {
-                                  val id = cursor.getLong(0)
-                                  val existingUri = ContentUris.withAppendedId(collection, id)
-                                  resolver.delete(existingUri, null, null)
-                              }
-                          }
-
-                          val values = ContentValues().apply {
-                              put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                              put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
-                              put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FinTrax_Drive_Sync")
-                          }
-                          val uri = resolver.insert(collection, values)
-                          if (uri != null) {
-                              resolver.openOutputStream(uri, "wt")?.use { out ->
-                                  out.write(jsonContent.toByteArray(Charsets.UTF_8))
-                              }
-                              success = true
-                          }
-                      } catch (_: Exception) {}
-                  }
-
-                  try {
-                      val internalDir = File(filesDir, "GoogleDriveBackup")
-                      if (!internalDir.exists()) internalDir.mkdirs()
-                      File(internalDir, fileName).writeText(jsonContent, Charsets.UTF_8)
-                      success = true
-                  } catch (_: Exception) {}
-
-                  return success
-              }
-
-              private fun readPersistentBackup(account: String): String? {
-                  val fileName = getBackupFileName(account)
-
-                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                      try {
-                          val resolver = contentResolver
-                          val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                          val projection = arrayOf(MediaStore.MediaColumns._ID)
-                          val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
-                          val selectionArgs = arrayOf(fileName)
-
-                          resolver.query(collection, projection, selection, selectionArgs, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
-                              if (cursor.moveToFirst()) {
-                                  val id = cursor.getLong(0)
-                                  val uri = ContentUris.withAppendedId(collection, id)
-                                  val text = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                                  if (!text.isNullOrEmpty()) return text
-                              }
-                          }
-                      } catch (_: Exception) {}
-                  }
-
-                  try {
-                      val internalFile = File(File(filesDir, "GoogleDriveBackup"), fileName)
-                      if (internalFile.exists() && internalFile.length() > 0) {
-                          return internalFile.readText(Charsets.UTF_8)
-                      }
-                  } catch (_: Exception) {}
-
-                  return null
-              }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -499,65 +301,6 @@ jobs:
                                   result.success(false)
                               }
                           }
-                          "pickGoogleAccount" -> {
-                              try {
-                                  @Suppress("DEPRECATION")
-                                  val intent = AccountManager.newChooseAccountIntent(
-                                      null,
-                                      null,
-                                      arrayOf("com.google"),
-                                      false,
-                                      null,
-                                      null,
-                                      null,
-                                      null
-                                  )
-                                  pendingResult = result
-                                  startActivityForResult(intent, 1005)
-                              } catch (e: Exception) {
-                                  result.success(null)
-                              }
-                          }
-                          "performDriveBackup" -> {
-                              val account = call.argument<String>("account") ?: ""
-                              val jsonContent = call.argument<String>("data") ?: ""
-                              if (account.isEmpty() || jsonContent.isEmpty()) {
-                                  result.success(false)
-                                  return@setMethodCallHandler
-                              }
-                              val localOk = writePersistentBackup(account, jsonContent)
-                              try { BackupManager(this).dataChanged() } catch (_: Exception) {}
-
-                              obtainDriveAccessToken(account) { token ->
-                                  var cloudOk = false
-                                  if (!token.isNullOrEmpty()) {
-                                      cloudOk = uploadToGoogleDriveCloud(token, jsonContent)
-                                      if (!cloudOk) {
-                                          AccountManager.get(this).invalidateAuthToken("com.google", token)
-                                      }
-                                  }
-                                  runOnUiThread {
-                                      result.success(cloudOk || localOk)
-                                  }
-                              }
-                          }
-                          "checkDriveBackup" -> {
-                              val account = call.argument<String>("account") ?: ""
-                              if (account.isEmpty()) {
-                                  result.success(null)
-                                  return@setMethodCallHandler
-                              }
-                              obtainDriveAccessToken(account) { token ->
-                                  var cloudJson: String? = null
-                                  if (!token.isNullOrEmpty()) {
-                                      cloudJson = downloadFromGoogleDriveCloud(token)
-                                  }
-                                  val finalJson = cloudJson ?: readPersistentBackup(account)
-                                  runOnUiThread {
-                                      result.success(finalJson)
-                                  }
-                              }
-                          }
                           "savePdfToDownloads" -> {
                               val bytes = call.argument<ByteArray>("bytes")
                               val fileName = call.argument<String>("fileName") ?: "FinTrax_Statement.pdf"
@@ -620,15 +363,6 @@ jobs:
                           pendingResult?.success(resultCode == Activity.RESULT_OK)
                           pendingResult = null
                       }
-                      1005 -> {
-                          if (resultCode == Activity.RESULT_OK && data != null) {
-                              val accountName = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
-                              pendingResult?.success(accountName)
-                          } else {
-                              pendingResult?.success(null)
-                          }
-                          pendingResult = null
-                      }
                       1006 -> {
                           if (resultCode == Activity.RESULT_OK && data?.data != null && pendingPdfBytes != null) {
                               try {
@@ -645,13 +379,6 @@ jobs:
                           pendingPdfBytes = null
                           pendingResult = null
                       }
-                      1008 -> {
-                          val action = pendingDriveAction
-                          pendingDriveAction = null
-                          if (resultCode == Activity.RESULT_OK && action != null) {
-                              action.invoke()
-                          }
-                      }
                   }
               }
           }
@@ -665,11 +392,11 @@ jobs:
       - name: Build Lightweight Split APK
         run: flutter build apk --release --split-per-abi
 
-      - name: Print APK SHA-1 Fingerprint for Google Drive Cloud API
+      - name: Verify Built APK Certificate SHA-1
         run: |
           echo "=========================================================="
-          echo "COPY THE SHA1 VALUE BELOW INTO GOOGLE CLOUD CONSOLE:"
-          keytool -list -v -keystore fintrax.jks -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+          $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
       
       - name: Upload APK
