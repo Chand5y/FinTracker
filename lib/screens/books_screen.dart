@@ -104,11 +104,14 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  String _formatDateStrict(String? isoString) {
+  String _formatCreatedDate(String? isoString) {
     final DateTime date = DateTime.tryParse(isoString ?? '') ?? DateTime.now();
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return "$month/$day/${date.year}";
+    return AppConstants.formatOrdinalDate(date);
+  }
+
+  String _formatUpdatedDateTime(String? isoString) {
+    final DateTime date = DateTime.tryParse(isoString ?? '') ?? DateTime.now();
+    return AppConstants.formatOrdinalDateTime(date);
   }
 
   void _showAddBookDialog() {
@@ -326,7 +329,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                 const SizedBox(height: 8),
                                 Row(
                                   children: [
-                                    Text('${sms.paymentMode} • ${_formatDateStrict(sms.date.toIso8601String())}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                    Text('${sms.paymentMode} • ${AppConstants.formatOrdinalDateTime(sms.date)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
                                     const Spacer(),
                                     TextButton(
                                       onPressed: () async {
@@ -407,56 +410,59 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  // Matches the exact logo lockup: Bold "Fin" + Thin Gold "Track", with tiny tagline matching the exact width
+  // Brand lockup: "FINANCE TRACKER" sits strictly narrower than "FinTrack"
   Widget _buildBrandHeader(bool isDark, bool useMaterialYou) {
     final Color finColor = isDark ? Colors.white : const Color(0xFF0E1726);
     final Color trackColor = useMaterialYou
         ? Theme.of(context).colorScheme.primary
         : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Text(
-              'Fin',
-              style: TextStyle(
-                color: finColor,
-                fontWeight: FontWeight.w700,
-                fontSize: 26,
-                letterSpacing: 0.2,
-                height: 1.0,
+    return IntrinsicWidth(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                'Fin',
+                style: TextStyle(
+                  color: finColor,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 26,
+                  letterSpacing: 0.2,
+                  height: 1.0,
+                ),
               ),
-            ),
-            Text(
-              'Track',
-              style: TextStyle(
-                color: trackColor,
-                fontWeight: FontWeight.w300,
-                fontSize: 26,
-                letterSpacing: 0.5,
-                height: 1.0,
+              Text(
+                'Track',
+                style: TextStyle(
+                  color: trackColor,
+                  fontWeight: FontWeight.w300,
+                  fontSize: 26,
+                  letterSpacing: 0.5,
+                  height: 1.0,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 3),
-        Text(
-          'YOUR PERSONAL FINANCE TRACKER',
-          style: TextStyle(
-            color: isDark ? Colors.grey[400] : Colors.grey[600],
-            fontSize: 5.5,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.65,
-            height: 1.0,
+            ],
           ),
-        ),
-      ],
+          const SizedBox(height: 3),
+          Text(
+            'FINANCE TRACKER',
+            textAlign: TextAlign.justify,
+            style: TextStyle(
+              color: isDark ? Colors.grey[400] : Colors.grey[600],
+              fontSize: 7.2,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 2.3,
+              height: 1.0,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -556,12 +562,12 @@ class _BooksScreenState extends State<BooksScreen> {
                             child: Material(
                               color: cardColor,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(18),
                                 side: BorderSide(color: borderColor, width: 1),
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(18),
                                 onTap: () {
                                   HapticFeedback.lightImpact();
                                   Navigator.push(
@@ -577,7 +583,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                   child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
-                                      // Icon styled with Midnight Navy & Champagne Gold like the App Icon
                                       Container(
                                         padding: const EdgeInsets.all(11),
                                         decoration: BoxDecoration(
@@ -597,50 +602,76 @@ class _BooksScreenState extends State<BooksScreen> {
                                         ),
                                       ),
                                       const SizedBox(width: 14),
-                                      // Fixed 3-line structure: Created at top, Book Name in middle, Updated at bottom
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Text(
-                                              'Created ${_formatDateStrict(book['createdAt']?.toString())}',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontSize: 10.5,
-                                                fontWeight: FontWeight.w500,
-                                                color: isDark ? Colors.grey[500] : Colors.grey[600],
-                                              ),
+                                            // Top Row: Book Title on left + Subtle "Created" Pill on right
+                                            Row(
+                                              crossAxisAlignment: CrossAxisAlignment.center,
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    book['name'].toString(),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                                  decoration: BoxDecoration(
+                                                    color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                                                    borderRadius: BorderRadius.circular(6),
+                                                  ),
+                                                  child: Text(
+                                                    'Created ${_formatCreatedDate(book['createdAt']?.toString())}',
+                                                    style: TextStyle(
+                                                      fontSize: 9.5,
+                                                      fontWeight: FontWeight.w500,
+                                                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                            const SizedBox(height: 3),
-                                            Text(
-                                              book['name'].toString(),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                                            ),
-                                            const SizedBox(height: 3),
-                                            Text(
-                                              'Updated ${_formatDateStrict(book['updatedAt']?.toString())}',
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontSize: 10.5,
-                                                fontWeight: FontWeight.w500,
-                                                color: isDark ? Colors.grey[500] : Colors.grey[600],
-                                              ),
+                                            const SizedBox(height: 6),
+                                            // Bottom Row: Updated Date & Time on left + Net Balance on right
+                                            Row(
+                                              crossAxisAlignment: CrossAxisAlignment.center,
+                                              children: [
+                                                Icon(
+                                                  Icons.schedule_rounded,
+                                                  size: 12,
+                                                  color: isDark ? Colors.grey[500] : Colors.grey[500],
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Expanded(
+                                                  child: Text(
+                                                    _formatUpdatedDateTime(book['updatedAt']?.toString()),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w500,
+                                                      color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.w800,
+                                                    fontSize: 16,
+                                                    color: isNegative ? AppConstants.expenseRed : AppConstants.incomeGreen,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 16,
-                                          color: isNegative ? AppConstants.expenseRed : AppConstants.incomeGreen,
                                         ),
                                       ),
                                     ],
