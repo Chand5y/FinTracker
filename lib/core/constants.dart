@@ -5,10 +5,11 @@ class AppConstants {
   static const String appTagline = 'YOUR FINANCIAL TRACKER';
   static const String defaultCurrency = '₹';
 
-  // Default Developer Credits
+  // Fixed Developer Credits (Non-editable by users)
   static const String developerName = 'Chandan Kumar';
+  static const String developerRole = 'Developed by';
   static const String defaultGithubId = 'Chand5y';
-  static const String defaultDeveloperEmail = 'chandankumar@example.com';
+  static const String defaultDeveloperEmail = 'mkchandankr@gmail.com';
 
   // Signature Champagne Gold & Midnight Navy (Matches App Icon)
   static const Color goldAccent = Color(0xFFC5A059);
@@ -95,6 +96,14 @@ class AppConstants {
     final String amPm = date.hour >= 12 ? 'PM' : 'AM';
     final String min = date.minute.toString().padLeft(2, '0');
     return '$datePart, $hour:$min $amPm';
+  }
+
+  /// Formats 24h time (e.g., 22, 0) as "10:00 PM"
+  static String formatTimeOfDay(int hour24, int minute) {
+    final int hour = hour24 == 0 ? 12 : (hour24 > 12 ? hour24 - 12 : hour24);
+    final String amPm = hour24 >= 12 ? 'PM' : 'AM';
+    final String min = minute.toString().padLeft(2, '0');
+    return '$hour:$min $amPm';
   }
 }
 
