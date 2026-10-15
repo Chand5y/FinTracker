@@ -521,29 +521,63 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             ),
             if (_imagePath.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Stack(
-                alignment: Alignment.topRight,
-                children: [
-                  GestureDetector(
-                    onTap: _openImageFullScreen,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Image.file(File(_imagePath), height: 170, width: double.infinity, fit: BoxFit.cover),
-                    ),
+              // Framed container with distinct border & inner mat so white screenshots never blend into the background
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF181A20) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF323642) : const Color(0xFFCBD5E1),
+                    width: 1.5,
                   ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: Colors.black54,
-                      child: IconButton(
-                        padding: EdgeInsets.zero,
-                        icon: const Icon(Icons.close, size: 18, color: Colors.white),
-                        onPressed: () => setState(() => _imagePath = ''),
+                  boxShadow: [
+                    if (!isDark)
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                  ],
+                ),
+                child: Stack(
+                  alignment: Alignment.topRight,
+                  children: [
+                    GestureDetector(
+                      onTap: _openImageFullScreen,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(11),
+                          border: Border.all(
+                            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: Image.file(
+                            File(_imagePath),
+                            height: 170,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: CircleAvatar(
+                        radius: 16,
+                        backgroundColor: Colors.black54,
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: const Icon(Icons.close, size: 18, color: Colors.white),
+                          onPressed: () => setState(() => _imagePath = ''),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 6),
               Text('Tap image to view full screen', style: TextStyle(fontSize: 11, color: Colors.grey[500]), textAlign: TextAlign.center),
