@@ -32,7 +32,9 @@ class FintrackApp extends StatelessWidget {
             final ColorScheme lightScheme = (useDynamic && lightDynamic != null)
                 ? lightDynamic
                 : ColorScheme.fromSeed(
-                    seedColor: AppConstants.accentIndigo,
+                    seedColor: AppConstants.goldAccent,
+                    primary: AppConstants.goldDarkText,
+                    secondary: AppConstants.goldAccent,
                     brightness: Brightness.light,
                     surface: AppConstants.cardLight,
                   );
@@ -40,7 +42,9 @@ class FintrackApp extends StatelessWidget {
             final ColorScheme darkScheme = (useDynamic && darkDynamic != null)
                 ? darkDynamic
                 : ColorScheme.fromSeed(
-                    seedColor: AppConstants.accentIndigo,
+                    seedColor: AppConstants.goldAccent,
+                    primary: AppConstants.goldAccent,
+                    secondary: AppConstants.goldAccent,
                     brightness: Brightness.dark,
                     surface: AppConstants.cardDark,
                   );
@@ -82,6 +86,21 @@ class FintrackApp extends StatelessWidget {
           fontWeight: FontWeight.w700,
           letterSpacing: -0.5,
         ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        indicatorColor: useDynamic
+            ? scheme.secondaryContainer
+            : AppConstants.goldAccent.withOpacity(isDark ? 0.22 : 0.18),
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return IconThemeData(color: useDynamic ? scheme.onSecondaryContainer : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText));
+          }
+          return IconThemeData(color: isDark ? Colors.grey[400] : Colors.grey[600]);
+        }),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: useDynamic ? scheme.primaryContainer : AppConstants.goldAccent,
+        foregroundColor: useDynamic ? scheme.onPrimaryContainer : AppConstants.iconNavy,
       ),
     );
   }
