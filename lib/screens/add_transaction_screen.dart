@@ -10,12 +10,14 @@ class AddTransactionScreen extends StatefulWidget {
   final int bookId;
   final String type;
   final TransactionModel? existingTransaction;
+  final bool isSmsDraft;
 
   const AddTransactionScreen({
     Key? key,
     required this.bookId,
     required this.type,
     this.existingTransaction,
+    this.isSmsDraft = false,
   }) : super(key: key);
 
   @override
@@ -59,7 +61,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     return '🏷️';
   }
 
-  // Custom Scrollable Card Sheet for Category Selection
   void _openCategoryPicker(bool isDark) {
     HapticFeedback.lightImpact();
     final scheme = Theme.of(context).colorScheme;
@@ -147,7 +148,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
-  // Custom Scrollable Card Sheet for Payment Method Selection
   void _openPaymentModePicker(bool isDark) {
     HapticFeedback.lightImpact();
     final scheme = Theme.of(context).colorScheme;
@@ -327,6 +327,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
     HapticFeedback.mediumImpact();
 
+    final bool isNewInsert = widget.existingTransaction == null || widget.existingTransaction?.id == null;
+
     final transaction = TransactionModel(
       id: widget.existingTransaction?.id,
       bookId: widget.bookId,
@@ -334,19 +336,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       amount: parsedAmount,
       name: _nameController.text.trim().isEmpty ? 'Untitled Entry' : _nameController.text.trim(),
       category: _selectedCategory ?? '',
+      notes: widget.existingTransaction?.notes ?? '',
       date: widget.existingTransaction?.date ?? DateTime.now(),
       currency: AppConstants.defaultCurrency,
       paymentMode: _paymentMode,
       imagePath: _imagePath,
     );
 
-    if (widget.existingTransaction == null) {
+    if (isNewInsert) {
       await DatabaseHelper.instance.insertTransaction(transaction);
     } else {
       await DatabaseHelper.instance.updateTransaction(transaction);
     }
 
-    if (mounted) Navigator.pop(context);
+    if (mounted) Navigator.pop(context, true);
   }
 
   Widget _buildSelectorCard({
@@ -409,16 +412,41 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bool isIncome = _selectedType == 'Income';
+    final String screenTitle = widget.isSmsDraft
+        ? 'Review SMS $_selectedType'
+        : (widget.existingTransaction == null ? 'Add $_selectedType' : 'Edit $_selectedType');
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.existingTransaction == null ? 'Add $_selectedType' : 'Edit $_selectedType'),
-      ),
+      appBar: AppBar(title: Text(screenTitle)),
       body: Form(
         key: _formKey,
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
+            if (widget.isSmsDraft && (widget.existingTransaction?.notes.isNotEmpty ?? false)) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? AppConstants.cardDark : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.sms_outlined, size: 18, color: Theme.of(context).colorScheme.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        widget.existingTransaction!.notes,
+                        style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[700]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             TextFormField(
               controller: _amountController,
               autofocus: widget.existingTransaction == null,
