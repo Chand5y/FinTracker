@@ -1,4 +1,4 @@
-name: Build Fintrack APK
+name: Build FinTrax APK
 on:
   push:
     branches:
@@ -19,21 +19,21 @@ jobs:
         with:
           channel: 'stable'
           
-      - name: Generate Android configuration files
-        run: flutter create --project-name fintrack --org com.chandankumar .
+      - name: Generate Android configuration files (com.chandsy.fintrax)
+        run: flutter create --project-name fintrax --org com.chandsy .
 
-      - name: Configure Native Bridge (True Google Drive Cloud API v3, Notifications, Biometrics & PDF)
+      - name: Configure Native Bridge (com.chandsy.fintrax)
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
           echo "Using pre-installed NDK: $INSTALLED_NDK"
           sed -i "s/flutter.ndkVersion/\"$INSTALLED_NDK\"/g" android/app/build.gradle*
-          sed -i 's/android:label="fintrack"/android:label="FinTrax"/g' android/app/src/main/AndroidManifest.xml
+          sed -i 's/android:label="fintrax"/android:label="FinTrax"/g' android/app/src/main/AndroidManifest.xml
           sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="true" android:fullBackupOnly="true"/' android/app/src/main/AndroidManifest.xml
           sed -i 's/<\/application>/    <receiver android:name=".ReminderReceiver" android:exported="false"\/>\n    <\/application>/' android/app/src/main/AndroidManifest.xml
-          mkdir -p android/app/src/main/kotlin/com/chandankumar/fintrack
+          mkdir -p android/app/src/main/kotlin/com/chandsy/fintrax
 
-          cat << 'EOF' > android/app/src/main/kotlin/com/chandankumar/fintrack/ReminderReceiver.kt
-          package com.chandankumar.fintrack
+          cat << 'EOF' > android/app/src/main/kotlin/com/chandsy/fintrax/ReminderReceiver.kt
+          package com.chandsy.fintrax
 
           import android.Manifest
           import android.app.AlarmManager
@@ -182,8 +182,8 @@ jobs:
           }
           EOF
 
-          cat << 'EOF' > android/app/src/main/kotlin/com/chandankumar/fintrack/MainActivity.kt
-          package com.chandankumar.fintrack
+          cat << 'EOF' > android/app/src/main/kotlin/com/chandsy/fintrax/MainActivity.kt
+          package com.chandsy.fintrax
 
           import android.Manifest
           import android.accounts.Account
@@ -504,11 +504,9 @@ jobs:
                                   result.success(false)
                                   return@setMethodCallHandler
                               }
-                              // 1. Save offline cache
                               val localOk = writePersistentBackup(account, jsonContent)
                               try { BackupManager(this).dataChanged() } catch (_: Exception) {}
 
-                              // 2. Upload directly to Google Drive Cloud API v3 (appDataFolder)
                               obtainDriveAccessToken(account) { token ->
                                   var cloudOk = false
                                   if (!token.isNullOrEmpty()) {
@@ -528,7 +526,6 @@ jobs:
                                   result.success(null)
                                   return@setMethodCallHandler
                               }
-                              // 1. Check Google Drive Cloud API v3 first (works across brand-new phones!)
                               obtainDriveAccessToken(account) { token ->
                                   var cloudJson: String? = null
                                   if (!token.isNullOrEmpty()) {
@@ -654,5 +651,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: fintrack-release
+          name: fintrax-release
           path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
