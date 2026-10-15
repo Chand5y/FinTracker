@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 class AppConstants {
   static const String appName = 'FinTrax';
-  static const String appTagline = 'YOUR PERSONAL FINANCIAL TRACKER';
+  static const String appTagline = 'YOUR FINANCIAL TRACKER';
   static const String defaultCurrency = '₹';
 
   // Default Developer Credits
