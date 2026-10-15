@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import '../data/database_helper.dart';
@@ -23,6 +25,12 @@ class BooksScreen extends StatefulWidget {
 
 class _BooksScreenState extends State<BooksScreen> {
   static const MethodChannel _smsChannel = MethodChannel('com.chandankumar.fintrack/sms');
+  static const String _driveScope = 'https://www.googleapis.com/auth/drive.appdata';
+  static const String _cloudFileName = 'fintrax_cloud_backup.json';
+
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: <String>[_driveScope],
+  );
 
   int _selectedIndex = 0;
   List<Map<String, dynamic>> _booksData = [];
@@ -75,7 +83,6 @@ class _BooksScreenState extends State<BooksScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
     if (themeProvider.driveAccount.isEmpty) return;
 
-    // Never overwrite an existing cloud backup with an empty database!
     final books = await DatabaseHelper.instance.getBooksWithBalances();
     if (books.isEmpty) return;
 
@@ -84,12 +91,12 @@ class _BooksScreenState extends State<BooksScreen> {
     if (themeProvider.lastAutoBackupDay == todayKey) return;
 
     try {
+      final GoogleSignInAccount? account = await _googleSignIn.signInSilently();
+      if (account == null) return;
+      final Map<String, String> authHeaders = await account.authHeaders;
       final String jsonPayload = await DatabaseHelper.instance.exportDatabaseJson();
-      final bool ok = await _smsChannel.invokeMethod('performDriveBackup', {
-        'account': themeProvider.driveAccount,
-        'data': jsonPayload,
-      }) ?? false;
-      if (ok) {
+      final String? fileId = await _uploadJsonToGoogleDrive(authHeaders, jsonPayload);
+      if (fileId != null && fileId.isNotEmpty) {
         await themeProvider.recordBackupSuccess(
           isoTimestamp: now.toIso8601String(),
           dayKey: todayKey,
@@ -180,7 +187,6 @@ class _BooksScreenState extends State<BooksScreen> {
     return AppConstants.formatOrdinalDateTime(date);
   }
 
-  /// Opens the Create New Book dialog and returns the newly created book's ID (or null if cancelled)
   Future<int?> _showAddBookDialog() async {
     HapticFeedback.lightImpact();
     final TextEditingController nameController = TextEditingController();
@@ -513,7 +519,6 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // If no books exist yet, immediately opens the Create New Book dialog and proceeds straight to adding the SMS entry
   Future<void> _promptBookAndEditSms(ParsedSmsTransaction sms, VoidCallback onAdded) async {
     int? chosenBookId;
 
@@ -602,67 +607,219 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  Future<String?> _ensureGoogleDriveAccount(ThemeProvider themeProvider, {bool forceChoose = false}) async {
-    if (themeProvider.driveAccount.isNotEmpty && !forceChoose) {
-      return themeProvider.driveAccount;
-    }
+  // ===========================================================================
+  // TRUE GOOGLE DRIVE CLOUD API v3 (google_sign_in + http)
+  // ===========================================================================
 
-    final String? selectedEmail = await _smsChannel.invokeMethod('pickGoogleAccount');
-    if (selectedEmail == null || selectedEmail.isEmpty || !mounted) return null;
+  void _showLoadingDialog(String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Row(
+          children: [
+            const SizedBox(width: 26, height: 26, child: CircularProgressIndicator(strokeWidth: 2.8)),
+            const SizedBox(width: 18),
+            Expanded(child: Text(message, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600))),
+          ],
+        ),
+      ),
+    );
+  }
 
-    final bool? granted = await showDialog<bool>(
+  void _showCloudErrorDialog(String title, String details) {
+    showDialog(
       context: context,
       builder: (dCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            Icon(Icons.add_to_drive_rounded, color: Theme.of(context).colorScheme.primary),
+            const Icon(Icons.error_outline_rounded, color: AppConstants.expenseRed),
             const SizedBox(width: 10),
-            const Expanded(child: Text('Allow Google Drive Access?', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+            Expanded(child: Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
           ],
         ),
-        content: Text(
-          'FinTrax wants permission to store and restore your ledger backups in Google Drive for:\n\n$selectedEmail\n\n• Automatic daily backup after 12:00 AM\n• Private app-only Drive sync',
-          style: const TextStyle(fontSize: 13.5, height: 1.4),
+        content: SingleChildScrollView(
+          child: Text(details, style: const TextStyle(fontSize: 13, height: 1.45)),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Deny')),
-          FilledButton(onPressed: () => Navigator.pop(dCtx, true), child: const Text('Allow')),
+          FilledButton(onPressed: () => Navigator.pop(dCtx), child: const Text('OK')),
         ],
       ),
     );
+  }
 
-    if (granted == true) {
-      await themeProvider.setDriveAccount(selectedEmail);
-      // Check if an existing backup is already stored for this Google account and sync its timestamp
-      try {
-        final String? existingJson = await _smsChannel.invokeMethod('checkDriveBackup', {'account': selectedEmail});
-        if (existingJson != null && existingJson.isNotEmpty) {
-          final Map<String, dynamic> decoded = jsonDecode(existingJson) as Map<String, dynamic>;
-          final String expIso = decoded['exportedAt']?.toString() ?? '';
-          if (expIso.isNotEmpty) {
-            await themeProvider.recordBackupSuccess(isoTimestamp: expIso, dayKey: themeProvider.lastAutoBackupDay);
+  Future<GoogleSignInAccount?> _authenticateGoogleDrive(ThemeProvider themeProvider, {bool forceChoose = false}) async {
+    try {
+      if (forceChoose) {
+        await _googleSignIn.signOut();
+      }
+      GoogleSignInAccount? account = _googleSignIn.currentUser;
+      if (account == null && !forceChoose) {
+        account = await _googleSignIn.signInSilently();
+      }
+      account ??= await _googleSignIn.signIn();
+      if (account == null) return null;
+
+      final bool hasDrivePermission = await _googleSignIn.canAccessScopes([_driveScope]);
+      if (!hasDrivePermission) {
+        final bool granted = await _googleSignIn.requestScopes([_driveScope]);
+        if (!granted) {
+          if (mounted) {
+            _showCloudErrorDialog(
+              'Drive Permission Required',
+              'Please allow FinTrax to access its private Google Drive folder so your books can be backed up to the cloud.',
+            );
           }
+          return null;
         }
-      } catch (_) {}
-      return selectedEmail;
+      }
+
+      await themeProvider.setDriveAccount(account.email);
+      return account;
+    } on PlatformException catch (e) {
+      if (mounted) {
+        _showCloudErrorDialog(
+          'Google Sign-In Blocked (${e.code})',
+          'Google Play Services rejected the sign-in:\n${e.message ?? e.toString()}\n\n'
+          'Fix in Google Cloud Console:\n'
+          '1. Go to Google Auth Platform -> Audience and tap "Publish App" (or add ${themeProvider.driveAccount.isEmpty ? "your Gmail" : themeProvider.driveAccount} under Test Users).\n'
+          '2. Verify Package Name is com.chandsy.fintrax and SHA-1 matches your APK.',
+        );
+      }
+      return null;
+    } catch (e) {
+      if (mounted) {
+        _showCloudErrorDialog('Sign-In Error', e.toString());
+      }
+      return null;
     }
-    return null;
+  }
+
+  Future<String?> _findCloudFileId(Map<String, String> authHeaders) async {
+    final Uri listUri = Uri.parse(
+      "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='$_cloudFileName' and trashed=false&fields=files(id,name,modifiedTime)&pageSize=1",
+    );
+    final response = await http.get(listUri, headers: authHeaders);
+    if (response.statusCode != 200) {
+      throw Exception('Drive API List Error (${response.statusCode}): ${response.body}');
+    }
+    final Map<String, dynamic> data = jsonDecode(response.body) as Map<String, dynamic>;
+    final List<dynamic> files = (data['files'] as List<dynamic>?) ?? [];
+    if (files.isEmpty) return null;
+    return (files.first as Map<String, dynamic>)['id']?.toString();
+  }
+
+  Future<String?> _uploadJsonToGoogleDrive(Map<String, String> authHeaders, String jsonPayload) async {
+    String? fileId = await _findCloudFileId(authHeaders);
+
+    if (fileId == null) {
+      final Uri createUri = Uri.parse('https://www.googleapis.com/drive/v3/files');
+      final createResp = await http.post(
+        createUri,
+        headers: {
+          ...authHeaders,
+          'Content-Type': 'application/json; charset=UTF-8',
+        },
+        body: jsonEncode({
+          'name': _cloudFileName,
+          'parents': ['appDataFolder'],
+        }),
+      );
+      if (createResp.statusCode != 200 && createResp.statusCode != 201) {
+        throw Exception('Drive Create Error (${createResp.statusCode}): ${createResp.body}');
+      }
+      final Map<String, dynamic> created = jsonDecode(createResp.body) as Map<String, dynamic>;
+      fileId = created['id']?.toString();
+    }
+
+    if (fileId == null || fileId.isEmpty) {
+      throw Exception('Failed to allocate file ID on Google Drive.');
+    }
+
+    final Uri uploadUri = Uri.parse('https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media');
+    final uploadResp = await http.patch(
+      uploadUri,
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json; charset=UTF-8',
+      },
+      body: utf8.encode(jsonPayload),
+    );
+
+    if (uploadResp.statusCode != 200) {
+      throw Exception('Drive Upload Error (${uploadResp.statusCode}): ${uploadResp.body}');
+    }
+    return fileId;
+  }
+
+  Future<String?> _downloadJsonFromGoogleDrive(Map<String, String> authHeaders) async {
+    final String? fileId = await _findCloudFileId(authHeaders);
+    if (fileId == null || fileId.isEmpty) return null;
+
+    final Uri downloadUri = Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId?alt=media');
+    final response = await http.get(downloadUri, headers: authHeaders);
+    if (response.statusCode != 200) {
+      throw Exception('Drive Download Error (${response.statusCode}): ${response.body}');
+    }
+    return utf8.decode(response.bodyBytes);
+  }
+
+  Future<void> _handleConnectOrSwitchAccount(ThemeProvider themeProvider) async {
+    HapticFeedback.lightImpact();
+    final GoogleSignInAccount? account = await _authenticateGoogleDrive(themeProvider, forceChoose: true);
+    if (account == null || !mounted) return;
+
+    _showLoadingDialog('Checking Google Drive for ${account.email}...');
+    try {
+      final Map<String, String> authHeaders = await account.authHeaders;
+      final String? existingJson = await _downloadJsonFromGoogleDrive(authHeaders);
+      if (mounted) Navigator.pop(context);
+
+      if (existingJson != null && existingJson.isNotEmpty) {
+        final Map<String, dynamic> decoded = jsonDecode(existingJson) as Map<String, dynamic>;
+        final String expIso = decoded['exportedAt']?.toString() ?? '';
+        if (expIso.isNotEmpty) {
+          await themeProvider.recordBackupSuccess(isoTimestamp: expIso, dayKey: themeProvider.lastAutoBackupDay);
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Connected to ${account.email} • Existing cloud backup found!'),
+              backgroundColor: AppConstants.incomeGreen,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Connected to ${account.email}')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        _showCloudErrorDialog('Google Drive Connection Failed', e.toString());
+      }
+    }
   }
 
   Future<void> _handleDriveBackup(ThemeProvider themeProvider) async {
     HapticFeedback.mediumImpact();
-    final String? account = await _ensureGoogleDriveAccount(themeProvider);
-    if (account == null) return;
+    final GoogleSignInAccount? account = await _authenticateGoogleDrive(themeProvider);
+    if (account == null || !mounted) return;
 
+    _showLoadingDialog('Uploading backup to Google Drive...');
     try {
+      final Map<String, String> authHeaders = await account.authHeaders;
       final String jsonPayload = await DatabaseHelper.instance.exportDatabaseJson();
-      final bool success = await _smsChannel.invokeMethod('performDriveBackup', {
-        'account': account,
-        'data': jsonPayload,
-      }) ?? false;
+      final String? cloudFileId = await _uploadJsonToGoogleDrive(authHeaders, jsonPayload);
 
-      if (success) {
+      if (mounted) Navigator.pop(context);
+
+      if (cloudFileId != null && cloudFileId.isNotEmpty) {
         final now = DateTime.now();
         final String todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
         await themeProvider.recordBackupSuccess(
@@ -672,27 +829,39 @@ class _BooksScreenState extends State<BooksScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Backed up to Google Drive ($account)'),
+              content: Text('Cloud Backup verified on Google Drive (${account.email})'),
               backgroundColor: AppConstants.incomeGreen,
             ),
           );
         }
       }
     } catch (e) {
+      if (mounted) Navigator.pop(context);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Google Drive backup failed.'), backgroundColor: AppConstants.expenseRed),
-        );
+        _showCloudErrorDialog('Google Drive Backup Failed', e.toString());
       }
     }
   }
 
   Future<void> _handleDriveRestore(ThemeProvider themeProvider) async {
     HapticFeedback.mediumImpact();
-    final String? account = await _ensureGoogleDriveAccount(themeProvider);
+    final GoogleSignInAccount? account = await _authenticateGoogleDrive(themeProvider);
     if (account == null || !mounted) return;
 
-    final String? jsonContent = await _smsChannel.invokeMethod('checkDriveBackup', {'account': account});
+    _showLoadingDialog('Checking Google Drive Cloud...');
+    String? jsonContent;
+    try {
+      final Map<String, String> authHeaders = await account.authHeaders;
+      jsonContent = await _downloadJsonFromGoogleDrive(authHeaders);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        _showCloudErrorDialog('Google Drive Restore Error', e.toString());
+      }
+      return;
+    }
+
     if (!mounted) return;
 
     if (jsonContent == null || jsonContent.isEmpty) {
@@ -701,7 +870,7 @@ class _BooksScreenState extends State<BooksScreen> {
         builder: (dCtx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('No Backup Found', style: TextStyle(fontWeight: FontWeight.w700)),
-          content: Text('No FinTrax backup was found on Google Drive for $account.'),
+          content: Text('No FinTrax backup file was found in Google Drive for ${account.email}.'),
           actions: [
             FilledButton(onPressed: () => Navigator.pop(dCtx), child: const Text('OK')),
           ],
@@ -731,7 +900,7 @@ class _BooksScreenState extends State<BooksScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Google Drive Backup Found', style: TextStyle(fontWeight: FontWeight.w700)),
         content: Text(
-          'Account: $account\nLast Backup: $backupTimeFormatted\nContents: $bookCount Book(s), $txCount Entries\n\nDo you want to restore this backup into FinTrax?',
+          'Account: ${account.email}\nLast Backup: $backupTimeFormatted\nContents: $bookCount Book(s), $txCount Entries\n\nDo you want to restore this cloud backup into FinTrax?',
           style: const TextStyle(fontSize: 13.5, height: 1.45),
         ),
         actions: [
@@ -752,7 +921,7 @@ class _BooksScreenState extends State<BooksScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Restored $restored book(s) from Google Drive ($account)!'),
+            content: Text('Restored $restored book(s) from Google Drive (${account.email})!'),
             backgroundColor: AppConstants.incomeGreen,
           ),
         );
@@ -1018,7 +1187,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                                   ),
                                                 ),
                                                 const SizedBox(width: 8),
-                                                // Compact "Created on :" badge without extending pill width
                                                 Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
                                                   decoration: BoxDecoration(
@@ -1115,7 +1283,6 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // Clean, spacious, executive Settings view
   Widget _buildSettingsView(BuildContext context, bool isDark) {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final scheme = Theme.of(context).colorScheme;
@@ -1229,7 +1396,6 @@ class _BooksScreenState extends State<BooksScreen> {
                 },
               ),
               const Divider(height: 1),
-              // Merged Daily Reminder Switch + Inline Tappable Time Chip
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 child: Row(
@@ -1305,7 +1471,7 @@ class _BooksScreenState extends State<BooksScreen> {
                   style: const TextStyle(fontSize: 11),
                 ),
                 trailing: TextButton(
-                  onPressed: () => _ensureGoogleDriveAccount(themeProvider, forceChoose: true),
+                  onPressed: () => _handleConnectOrSwitchAccount(themeProvider),
                   child: Text(themeProvider.driveAccount.isEmpty ? 'Connect' : 'Switch', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
                 ),
               ),
@@ -1343,7 +1509,6 @@ class _BooksScreenState extends State<BooksScreen> {
             ],
           ),
 
-          // Clean, Structured Privacy & Zero-Ads Card
           Container(
             margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
