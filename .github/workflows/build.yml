@@ -3,6 +3,10 @@ on:
   push:
     branches:
       - main
+
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build APK
@@ -18,6 +22,25 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+
+      - name: Setup Permanent Signing Key (Keeps SHA-1 Identical Forever)
+        run: |
+          if [ ! -f "fintrax.jks" ]; then
+            echo "Generating permanent FinTrax signing key..."
+            keytool -genkeypair -v \
+              -keystore fintrax.jks \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Chandan Kumar, OU=FinTrax, O=Chandsy, L=Patna, ST=Bihar, C=IN"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add fintrax.jks
+            git commit -m "Lock permanent Android signing key for Google Drive OAuth" || true
+            git push || true
+          fi
+          mkdir -p ~/.android
+          cp fintrax.jks ~/.android/debug.keystore
           
       - name: Generate Android configuration files (com.chandsy.fintrax)
         run: flutter create --project-name fintrax --org com.chandsy .
@@ -217,7 +240,6 @@ jobs:
               private var pendingPdfBytes: ByteArray? = null
               private var pendingDriveAction: (() -> Unit)? = null
 
-              // --- REAL GOOGLE DRIVE REST API v3 CLOUD ENGINE ---
               private fun obtainDriveAccessToken(accountName: String, onToken: (String?) -> Unit) {
                   Thread {
                       try {
@@ -320,7 +342,6 @@ jobs:
                   }
               }
 
-              // --- OFFLINE FALLBACK CACHE ---
               private fun getBackupFileName(account: String): String {
                   return account.lowercase().replace(Regex("[^a-z0-9._-]"), "_") + "_fintrax_cloud.json"
               }
@@ -646,7 +667,10 @@ jobs:
 
       - name: Print APK SHA-1 Fingerprint for Google Drive Cloud API
         run: |
-          keytool -printcert -jarfile build/app/outputs/flutter-apk/app-arm64-v8a-release.apk | grep -i "SHA1:" || true
+          echo "=========================================================="
+          echo "COPY THE SHA1 VALUE BELOW INTO GOOGLE CLOUD CONSOLE:"
+          keytool -list -v -keystore fintrax.jks -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1:|SHA256:"
+          echo "=========================================================="
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
