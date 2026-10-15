@@ -57,7 +57,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final double netBalance = totalIncome - totalExpenses;
     final bool isNetNegative = netBalance < 0;
 
-    // Signature PDF Palette
     const PdfColor navyBg = PdfColor.fromInt(0xFF111C30);
     const PdfColor goldColor = PdfColor.fromInt(0xFFC5A059);
     const PdfColor greenText = PdfColor.fromInt(0xFF16A34A);
@@ -94,15 +93,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           style: pw.TextStyle(color: PdfColors.white, fontSize: 24, fontWeight: pw.FontWeight.bold),
                         ),
                         pw.Text(
-                          'Track',
+                          'Trax',
                           style: const pw.TextStyle(color: goldColor, fontSize: 24),
                         ),
                       ],
                     ),
                     pw.SizedBox(height: 2),
                     pw.Text(
-                      'FINANCE TRACKER',
-                      style: pw.TextStyle(color: goldColor, fontSize: 7, fontWeight: pw.FontWeight.bold, letterSpacing: 2),
+                      AppConstants.appTagline,
+                      style: pw.TextStyle(color: goldColor, fontSize: 5.5, fontWeight: pw.FontWeight.bold, letterSpacing: 0.8),
                     ),
                   ],
                 ),
@@ -134,7 +133,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('FinTrack • Personal Finance Statement', style: const pw.TextStyle(color: mutedText, fontSize: 9)),
+                pw.Text('FinTrax • Personal Financial Statement', style: const pw.TextStyle(color: mutedText, fontSize: 9)),
                 pw.Text('Page ${ctx.pageNumber} of ${ctx.pagesCount}', style: const pw.TextStyle(color: mutedText, fontSize: 9)),
               ],
             ),
@@ -142,7 +141,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         },
         build: (pw.Context context) {
           return [
-            // 3 Executive Summary Cards (Total In, Total Out, Net Balance)
             pw.Row(
               children: [
                 pw.Expanded(
@@ -217,7 +215,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             pw.SizedBox(height: 8),
 
-            // Color-Coded Ledger Table
             pw.Table(
               border: pw.TableBorder.all(color: slateBorder, width: 0.6),
               columnWidths: {
@@ -228,7 +225,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 4: const pw.FlexColumnWidth(1.8),
               },
               children: [
-                // Table Header
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: navyBg),
                   children: [
@@ -254,7 +250,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
-                // Table Data Rows
                 ...List.generate(_transactions.length, (idx) {
                   final tx = _transactions[idx];
                   final bool isIncome = tx.type == 'Income';
@@ -299,7 +294,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
 
-    await Printing.sharePdf(bytes: await pdf.save(), filename: '${widget.bookName}_Statement.pdf');
+    await Printing.sharePdf(bytes: await pdf.save(), filename: '${widget.bookName}_FinTrax_Statement.pdf');
   }
 
   void _showTransactionOptions(TransactionModel tx) {
