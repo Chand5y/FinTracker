@@ -22,7 +22,7 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrack --org com.chandankumar .
 
-      - name: Configure Native Bridge (Drive Account, Notifications, Biometrics & PDF Saver)
+      - name: Configure Native Bridge (Persistent Drive Sync, Notifications, Biometrics & PDF Saver)
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
           echo "Using pre-installed NDK: $INSTALLED_NDK"
@@ -94,7 +94,6 @@ jobs:
 
                   nm.notify(3001, builder.build())
 
-                  // Reschedule for tomorrow
                   val hour = intent?.getIntExtra("hour", 22) ?: 22
                   val minute = intent?.getIntExtra("minute", 0) ?: 0
                   scheduleNext(context, hour, minute)
@@ -191,11 +190,15 @@ jobs:
           import android.app.Activity
           import android.app.KeyguardManager
           import android.app.backup.BackupManager
+          import android.content.ContentUris
+          import android.content.ContentValues
           import android.content.Context
           import android.content.Intent
           import android.content.pm.PackageManager
           import android.net.Uri
           import android.os.Build
+          import android.os.Environment
+          import android.provider.MediaStore
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
@@ -206,21 +209,100 @@ jobs:
               private var pendingResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
 
-              private fun getDriveVaultFiles(account: String): List<File> {
-                  val safeName = account.lowercase().replace(Regex("[^a-z0-9._-]"), "_") + "_fintrax_drive.json"
-                  val list = mutableListOf<File>()
+              private fun getBackupFileName(account: String): String {
+                  return account.lowercase().replace(Regex("[^a-z0-9._-]"), "_") + "_fintrax_cloud.json"
+              }
+
+              // Writes to MediaStore.Downloads so the backup survives "Clear Data" without any file picker popup
+              private fun writePersistentBackup(account: String, jsonContent: String): Boolean {
+                  val fileName = getBackupFileName(account)
+                  var success = false
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      try {
+                          val resolver = contentResolver
+                          val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                          val projection = arrayOf(MediaStore.MediaColumns._ID)
+                          val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                          val selectionArgs = arrayOf(fileName)
+
+                          resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                              while (cursor.moveToNext()) {
+                                  val id = cursor.getLong(0)
+                                  val existingUri = ContentUris.withAppendedId(collection, id)
+                                  resolver.delete(existingUri, null, null)
+                              }
+                          }
+
+                          val values = ContentValues().apply {
+                              put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                              put(MediaStore.MediaColumns.MIME_TYPE, "application/json")
+                              put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/FinTrax_Drive_Sync")
+                          }
+                          val uri = resolver.insert(collection, values)
+                          if (uri != null) {
+                              resolver.openOutputStream(uri, "wt")?.use { out ->
+                                  out.write(jsonContent.toByteArray(Charsets.UTF_8))
+                              }
+                              success = true
+                          }
+                      } catch (_: Exception) {}
+                  }
+
                   try {
-                      val mediaDirs = externalMediaDirs
-                      if (mediaDirs != null && mediaDirs.isNotEmpty() && mediaDirs[0] != null) {
-                          val dir = File(mediaDirs[0], "GoogleDriveBackup")
-                          if (!dir.exists()) dir.mkdirs()
-                          list.add(File(dir, safeName))
+                      val pubDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "FinTrax_Drive_Sync")
+                      if (!pubDir.exists()) pubDir.mkdirs()
+                      File(pubDir, fileName).writeText(jsonContent, Charsets.UTF_8)
+                      success = true
+                  } catch (_: Exception) {}
+
+                  try {
+                      val internalDir = File(filesDir, "GoogleDriveBackup")
+                      if (!internalDir.exists()) internalDir.mkdirs()
+                      File(internalDir, fileName).writeText(jsonContent, Charsets.UTF_8)
+                      success = true
+                  } catch (_: Exception) {}
+
+                  return success
+              }
+
+              private fun readPersistentBackup(account: String): String? {
+                  val fileName = getBackupFileName(account)
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                      try {
+                          val resolver = contentResolver
+                          val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                          val projection = arrayOf(MediaStore.MediaColumns._ID)
+                          val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ?"
+                          val selectionArgs = arrayOf(fileName)
+
+                          resolver.query(collection, projection, selection, selectionArgs, "${MediaStore.MediaColumns.DATE_MODIFIED} DESC")?.use { cursor ->
+                              if (cursor.moveToFirst()) {
+                                  val id = cursor.getLong(0)
+                                  val uri = ContentUris.withAppendedId(collection, id)
+                                  val text = resolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                                  if (!text.isNullOrEmpty()) return text
+                              }
+                          }
+                      } catch (_: Exception) {}
+                  }
+
+                  try {
+                      val pubFile = File(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "FinTrax_Drive_Sync"), fileName)
+                      if (pubFile.exists() && pubFile.length() > 0) {
+                          return pubFile.readText(Charsets.UTF_8)
                       }
                   } catch (_: Exception) {}
-                  val internalDir = File(filesDir, "GoogleDriveBackup")
-                  if (!internalDir.exists()) internalDir.mkdirs()
-                  list.add(File(internalDir, safeName))
-                  return list
+
+                  try {
+                      val internalFile = File(File(filesDir, "GoogleDriveBackup"), fileName)
+                      if (internalFile.exists() && internalFile.length() > 0) {
+                          return internalFile.readText(Charsets.UTF_8)
+                      }
+                  } catch (_: Exception) {}
+
+                  return null
               }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -325,15 +407,9 @@ jobs:
                                   result.success(false)
                                   return@setMethodCallHandler
                               }
-                              try {
-                                  for (file in getDriveVaultFiles(account)) {
-                                      file.writeText(jsonContent, Charsets.UTF_8)
-                                  }
-                                  BackupManager(this).dataChanged()
-                                  result.success(true)
-                              } catch (e: Exception) {
-                                  result.success(false)
-                              }
+                              val ok = writePersistentBackup(account, jsonContent)
+                              try { BackupManager(this).dataChanged() } catch (_: Exception) {}
+                              result.success(ok)
                           }
                           "checkDriveBackup" -> {
                               val account = call.argument<String>("account") ?: ""
@@ -341,16 +417,7 @@ jobs:
                                   result.success(null)
                                   return@setMethodCallHandler
                               }
-                              var foundContent: String? = null
-                              for (file in getDriveVaultFiles(account)) {
-                                  if (file.exists() && file.length() > 0) {
-                                      try {
-                                          foundContent = file.readText(Charsets.UTF_8)
-                                          break
-                                      } catch (_: Exception) {}
-                                  }
-                              }
-                              result.success(foundContent)
+                              result.success(readPersistentBackup(account))
                           }
                           "savePdfToDownloads" -> {
                               val bytes = call.argument<ByteArray>("bytes")
