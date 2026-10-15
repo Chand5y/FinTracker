@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/constants.dart';
 
 enum AppThemeChoice { system, light, dark }
 
@@ -9,18 +8,29 @@ class ThemeProvider extends ChangeNotifier {
   bool _useMaterialYou = false;
   bool _smsAutoTrack = false;
   bool _appLockEnabled = false;
-  String _appPin = '';
-  String _devEmail = AppConstants.defaultDeveloperEmail;
-  String _devGithub = AppConstants.defaultGithubId;
+
+  // Google Drive Backup State
+  String _driveAccount = '';
+  String _lastBackupIso = '';
+  String _lastAutoBackupDay = '';
+
+  // Daily Notification Reminder State (Default 10:00 PM -> 22:00)
+  bool _dailyReminderEnabled = true;
+  int _reminderHour = 22;
+  int _reminderMinute = 0;
+
   bool _isInitialized = false;
 
   AppThemeChoice get themeChoice => _themeChoice;
   bool get useMaterialYou => _useMaterialYou;
   bool get smsAutoTrack => _smsAutoTrack;
   bool get appLockEnabled => _appLockEnabled;
-  String get appPin => _appPin;
-  String get devEmail => _devEmail;
-  String get devGithub => _devGithub;
+  String get driveAccount => _driveAccount;
+  String get lastBackupIso => _lastBackupIso;
+  String get lastAutoBackupDay => _lastAutoBackupDay;
+  bool get dailyReminderEnabled => _dailyReminderEnabled;
+  int get reminderHour => _reminderHour;
+  int get reminderMinute => _reminderMinute;
   bool get isInitialized => _isInitialized;
 
   ThemeMode get flutterThemeMode {
@@ -47,9 +57,12 @@ class ThemeProvider extends ChangeNotifier {
     _useMaterialYou = prefs.getBool('use_material_you') ?? false;
     _smsAutoTrack = prefs.getBool('sms_auto_track') ?? false;
     _appLockEnabled = prefs.getBool('app_lock_enabled') ?? false;
-    _appPin = prefs.getString('app_pin') ?? '';
-    _devEmail = prefs.getString('dev_email') ?? AppConstants.defaultDeveloperEmail;
-    _devGithub = prefs.getString('dev_github') ?? AppConstants.defaultGithubId;
+    _driveAccount = prefs.getString('drive_account') ?? '';
+    _lastBackupIso = prefs.getString('last_backup_iso') ?? '';
+    _lastAutoBackupDay = prefs.getString('last_auto_backup_day') ?? '';
+    _dailyReminderEnabled = prefs.getBool('daily_reminder_enabled') ?? true;
+    _reminderHour = prefs.getInt('reminder_hour') ?? 22;
+    _reminderMinute = prefs.getInt('reminder_minute') ?? 0;
     _isInitialized = true;
     notifyListeners();
   }
@@ -75,25 +88,37 @@ class ThemeProvider extends ChangeNotifier {
     await prefs.setBool('sms_auto_track', value);
   }
 
-  Future<void> setAppLock(bool enabled, {String? pin}) async {
+  Future<void> setAppLock(bool enabled) async {
     _appLockEnabled = enabled;
-    if (pin != null) {
-      _appPin = pin;
-    }
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('app_lock_enabled', enabled);
-    if (pin != null) {
-      await prefs.setString('app_pin', pin);
-    }
   }
 
-  Future<void> updateDeveloperCredits({required String email, required String github}) async {
-    _devEmail = email.trim().isEmpty ? AppConstants.defaultDeveloperEmail : email.trim();
-    _devGithub = github.trim().replaceAll('@', '');
+  Future<void> setDriveAccount(String email) async {
+    _driveAccount = email.trim();
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('dev_email', _devEmail);
-    await prefs.setString('dev_github', _devGithub);
+    await prefs.setString('drive_account', _driveAccount);
+  }
+
+  Future<void> recordBackupSuccess({required String isoTimestamp, required String dayKey}) async {
+    _lastBackupIso = isoTimestamp;
+    _lastAutoBackupDay = dayKey;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('last_backup_iso', isoTimestamp);
+    await prefs.setString('last_auto_backup_day', dayKey);
+  }
+
+  Future<void> setDailyReminder({required bool enabled, int? hour, int? minute}) async {
+    _dailyReminderEnabled = enabled;
+    if (hour != null) _reminderHour = hour;
+    if (minute != null) _reminderMinute = minute;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('daily_reminder_enabled', _dailyReminderEnabled);
+    await prefs.setInt('reminder_hour', _reminderHour);
+    await prefs.setInt('reminder_minute', _reminderMinute);
   }
 }
