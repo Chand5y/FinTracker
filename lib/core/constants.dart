@@ -4,16 +4,21 @@ class AppConstants {
   static const String appName = 'FinTrack';
   static const String defaultCurrency = '₹';
 
-  // Classy Minimalist Palette
-  static const Color accentIndigo = Color(0xFF4F46E5);
+  // Signature Champagne Gold & Midnight Navy (Matches App Icon)
+  static const Color goldAccent = Color(0xFFC5A059);
+  static const Color goldDarkText = Color(0xFF9E7B36);
+  static const Color iconNavy = Color(0xFF111C30);
+  static const Color accentIndigo = Color(0xFFC5A059); // Alias for compatibility
+
+  // Clean Light Palette
   static const Color bgLight = Color(0xFFF8FAFC);
   static const Color cardLight = Color(0xFFFFFFFF);
   static const Color borderLight = Color(0xFFE2E8F0);
 
   // True AMOLED Dark Palette
   static const Color bgDark = Color(0xFF000000);
-  static const Color cardDark = Color(0xFF121214);
-  static const Color borderDark = Color(0xFF222226);
+  static const Color cardDark = Color(0xFF121316);
+  static const Color borderDark = Color(0xFF22242A);
 
   // Semantic Colors
   static const Color incomeGreen = Color(0xFF16A34A);
@@ -45,7 +50,7 @@ class ParsedSmsTransaction {
   final String sender;
   final String body;
   final double amount;
-  final String type; // 'Income' or 'Expense'
+  final String type;
   final String merchant;
   final String paymentMode;
   final DateTime date;
@@ -70,7 +75,6 @@ class ParsedSmsTransaction {
     if (id.isEmpty || body.isEmpty) return null;
     final lower = body.toLowerCase();
 
-    // 1. Ignore OTPs, Promos, Statements, and Due Reminders
     const ignoreWords = [
       'otp', 'one time password', 'verification code', 'secret code',
       'pre-approved', 'offer', 'discount', 'cashback up to', 'win ',
@@ -81,29 +85,24 @@ class ParsedSmsTransaction {
       if (lower.contains(w)) return null;
     }
 
-    // Must look like a financial message
     final hasBankContext = RegExp(r'(a/c|acct|account|bank|upi|vpa|card|debited|credited|spent|paid)', caseSensitive: false).hasMatch(body);
     if (!hasBankContext) return null;
 
-    // 2. Determine Transaction Type
     final isDebit = RegExp(r'(debited|spent|paid|sent\s+rs|withdrawn|purchase|charged)', caseSensitive: false).hasMatch(body);
     final isCredit = RegExp(r'(credited|received|deposited|refund)', caseSensitive: false).hasMatch(body);
     if (!isDebit && !isCredit) return null;
 
-    // In UPI SMS, "debited from A/c ... and credited to VPA" is an Expense
     String type = 'Expense';
     if (isCredit && !lower.contains('debited from') && !lower.contains('sent rs')) {
       type = 'Income';
     }
 
-    // 3. Extract Amount (Rs. / INR / ₹)
     final amtMatch = RegExp(r'(?:rs\.?|inr|₹)\s*([0-9,]+(?:\.[0-9]{1,2})?)', caseSensitive: false).firstMatch(body);
     if (amtMatch == null) return null;
     final cleanAmt = amtMatch.group(1)!.replaceAll(',', '');
     final double? amount = double.tryParse(cleanAmt);
     if (amount == null || amount <= 0) return null;
 
-    // 4. Detect Payment Mode
     String mode = 'Online';
     if (lower.contains('gpay') || lower.contains('google pay')) mode = 'GPay';
     else if (lower.contains('paytm')) mode = 'Paytm';
@@ -112,7 +111,6 @@ class ParsedSmsTransaction {
     else if (lower.contains('debit card') || lower.contains('pos')) mode = 'Debit Card';
     else if (lower.contains('atm')) mode = 'Cash';
 
-    // 5. Extract Merchant / Counterparty Name
     String merchant = sender.replaceAll(RegExp(r'^[A-Z]{2}-'), '');
     final toMatch = RegExp(r'(?:to|at|towards|from)\s+([A-Za-z0-9\s&\-\.@]{2,22}?)(?:\s+on|\s+ref|\s+upi|\s+avl|\.|$)', caseSensitive: false).firstMatch(body);
     if (toMatch != null && toMatch.group(1) != null) {
