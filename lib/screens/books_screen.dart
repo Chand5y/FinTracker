@@ -407,42 +407,66 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  // Strictly matches tagline width to "FinTrack" width
-  Widget _buildBrandHeader(bool isDark) {
-    final Color primaryText = isDark ? Colors.white : const Color(0xFF0F172A);
-    return IntrinsicWidth(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Fin', style: TextStyle(color: primaryText, fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5)),
-              Text('Track', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w800, fontSize: 24, letterSpacing: -0.5)),
-            ],
-          ),
-          FittedBox(
-            fit: BoxFit.contain,
-            child: Text(
-              'YOUR PERSONAL FINANCE TRACKER',
+  // Matches the exact logo lockup: Bold "Fin" + Thin Gold "Track", with tiny tagline matching the exact width
+  Widget _buildBrandHeader(bool isDark, bool useMaterialYou) {
+    final Color finColor = isDark ? Colors.white : const Color(0xFF0E1726);
+    final Color trackColor = useMaterialYou
+        ? Theme.of(context).colorScheme.primary
+        : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              'Fin',
               style: TextStyle(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.5,
+                color: finColor,
+                fontWeight: FontWeight.w700,
+                fontSize: 26,
+                letterSpacing: 0.2,
+                height: 1.0,
               ),
             ),
+            Text(
+              'Track',
+              style: TextStyle(
+                color: trackColor,
+                fontWeight: FontWeight.w300,
+                fontSize: 26,
+                letterSpacing: 0.5,
+                height: 1.0,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 3),
+        Text(
+          'YOUR PERSONAL FINANCE TRACKER',
+          style: TextStyle(
+            color: isDark ? Colors.grey[400] : Colors.grey[600],
+            fontSize: 5.5,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.65,
+            height: 1.0,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  Widget _buildBooksView(bool isDark) {
+  Widget _buildBooksView(bool isDark, bool useMaterialYou) {
     final scheme = Theme.of(context).colorScheme;
+    final Color goldOrDynamic = useMaterialYou ? scheme.primary : AppConstants.goldAccent;
+
     return Scaffold(
       appBar: AppBar(
-        title: _buildBrandHeader(isDark),
+        title: _buildBrandHeader(isDark, useMaterialYou),
         actions: [
           PopupMenuButton<BookSort>(
             icon: const Icon(Icons.sort_rounded),
@@ -468,7 +492,7 @@ class _BooksScreenState extends State<BooksScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Material(
-                color: scheme.primaryContainer.withOpacity(isDark ? 0.35 : 0.7),
+                color: goldOrDynamic.withOpacity(isDark ? 0.18 : 0.12),
                 borderRadius: BorderRadius.circular(14),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
@@ -477,7 +501,7 @@ class _BooksScreenState extends State<BooksScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     child: Row(
                       children: [
-                        Icon(Icons.sms_outlined, size: 20, color: scheme.primary),
+                        Icon(Icons.sms_outlined, size: 20, color: goldOrDynamic),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -485,9 +509,9 @@ class _BooksScreenState extends State<BooksScreen> {
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                           ),
                         ),
-                        Text('Review', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text('Review', style: TextStyle(color: goldOrDynamic, fontWeight: FontWeight.bold, fontSize: 13)),
                         const SizedBox(width: 4),
-                        Icon(Icons.arrow_forward_ios_rounded, size: 12, color: scheme.primary),
+                        Icon(Icons.arrow_forward_ios_rounded, size: 12, color: goldOrDynamic),
                       ],
                     ),
                   ),
@@ -502,7 +526,7 @@ class _BooksScreenState extends State<BooksScreen> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.menu_book_rounded, size: 56, color: Colors.grey.withOpacity(0.4)),
+                            Icon(Icons.menu_book_rounded, size: 56, color: goldOrDynamic.withOpacity(0.45)),
                             const SizedBox(height: 12),
                             Text('No books yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[500])),
                             const SizedBox(height: 4),
@@ -520,12 +544,12 @@ class _BooksScreenState extends State<BooksScreen> {
                           final bool isNegative = netBalance < 0;
 
                           final Color cardColor = isDark
-                              ? (isPinned ? const Color(0xFF181824) : AppConstants.cardDark)
-                              : (isPinned ? const Color(0xFFF1F5F9) : AppConstants.cardLight);
+                              ? (isPinned ? const Color(0xFF171A24) : AppConstants.cardDark)
+                              : (isPinned ? const Color(0xFFFAF6EE) : AppConstants.cardLight);
 
                           final Color borderColor = isDark
-                              ? (isPinned ? scheme.primary.withOpacity(0.35) : AppConstants.borderDark)
-                              : (isPinned ? scheme.primary.withOpacity(0.25) : AppConstants.borderLight);
+                              ? (isPinned ? goldOrDynamic.withOpacity(0.45) : AppConstants.borderDark)
+                              : (isPinned ? goldOrDynamic.withOpacity(0.40) : AppConstants.borderLight);
 
                           return Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
@@ -549,39 +573,68 @@ class _BooksScreenState extends State<BooksScreen> {
                                 },
                                 onLongPress: () => _showBookOptions(book['id'] as int, book['name'].toString(), (book['isPinned'] ?? 0) as int),
                                 child: Padding(
-                                  padding: const EdgeInsets.all(16),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                   child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
                                     children: [
+                                      // Icon styled with Midnight Navy & Champagne Gold like the App Icon
                                       Container(
                                         padding: const EdgeInsets.all(11),
                                         decoration: BoxDecoration(
-                                          color: scheme.primary.withOpacity(0.1),
+                                          color: useMaterialYou
+                                              ? scheme.primary.withOpacity(0.12)
+                                              : (isDark ? AppConstants.iconNavy : const Color(0xFFF5EFE2)),
                                           borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: goldOrDynamic.withOpacity(0.35),
+                                            width: 0.8,
+                                          ),
                                         ),
                                         child: Icon(
                                           isPinned ? Icons.push_pin_rounded : Icons.book_rounded,
-                                          color: scheme.primary,
-                                          size: 22,
+                                          color: useMaterialYou ? scheme.primary : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText),
+                                          size: 20,
                                         ),
                                       ),
                                       const SizedBox(width: 14),
+                                      // Fixed 3-line structure: Created at top, Book Name in middle, Updated at bottom
                                       Expanded(
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Text(
+                                              'Created ${_formatDateStrict(book['createdAt']?.toString())}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w500,
+                                                color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                              ),
+                                            ),
+                                            const SizedBox(height: 3),
+                                            Text(
                                               book['name'].toString(),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                                             ),
-                                            const SizedBox(height: 4),
+                                            const SizedBox(height: 3),
                                             Text(
-                                              'Created ${_formatDateStrict(book['createdAt']?.toString())}  •  Updated ${_formatDateStrict(book['updatedAt']?.toString())}',
-                                              style: TextStyle(fontSize: 11, color: isDark ? Colors.grey[500] : Colors.grey[600]),
+                                              'Updated ${_formatDateStrict(book['updatedAt']?.toString())}',
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w500,
+                                                color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                              ),
                                             ),
                                           ],
                                         ),
                                       ),
-                                      const SizedBox(width: 8),
+                                      const SizedBox(width: 12),
                                       Text(
                                         '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${netBalance.abs().toStringAsFixed(0)}',
                                         style: TextStyle(
@@ -648,10 +701,26 @@ class _BooksScreenState extends State<BooksScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: SegmentedButton<AppThemeChoice>(
+                        showSelectedIcon: false,
+                        style: SegmentedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        ),
                         segments: const [
-                          ButtonSegment(value: AppThemeChoice.system, icon: Icon(Icons.brightness_auto_outlined, size: 18), label: Text('Auto')),
-                          ButtonSegment(value: AppThemeChoice.light, icon: Icon(Icons.light_mode_outlined, size: 18), label: Text('Light')),
-                          ButtonSegment(value: AppThemeChoice.dark, icon: Icon(Icons.dark_mode_outlined, size: 18), label: Text('AMOLED')),
+                          ButtonSegment(
+                            value: AppThemeChoice.system,
+                            icon: Icon(Icons.brightness_auto_outlined, size: 17),
+                            label: Text('Auto', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 13)),
+                          ),
+                          ButtonSegment(
+                            value: AppThemeChoice.light,
+                            icon: Icon(Icons.light_mode_outlined, size: 17),
+                            label: Text('Light', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 13)),
+                          ),
+                          ButtonSegment(
+                            value: AppThemeChoice.dark,
+                            icon: Icon(Icons.dark_mode_outlined, size: 17),
+                            label: Text('AMOLED', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 13)),
+                          ),
                         ],
                         selected: {themeProvider.themeChoice},
                         onSelectionChanged: (selection) {
@@ -667,7 +736,7 @@ class _BooksScreenState extends State<BooksScreen> {
               SwitchListTile(
                 secondary: Icon(Icons.color_lens_outlined, color: scheme.primary),
                 title: const Text('Material You Colors', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Use your Android wallpaper colors', style: TextStyle(fontSize: 12)),
+                subtitle: const Text('Override signature Gold theme with wallpaper colors', style: TextStyle(fontSize: 12)),
                 value: themeProvider.useMaterialYou,
                 onChanged: (val) {
                   HapticFeedback.lightImpact();
@@ -743,11 +812,12 @@ class _BooksScreenState extends State<BooksScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final themeProvider = Provider.of<ThemeProvider>(context);
     return Scaffold(
       body: AnimatedSwitcher(
         duration: const Duration(milliseconds: 220),
         child: _selectedIndex == 0
-            ? KeyedSubtree(key: const ValueKey('books'), child: _buildBooksView(isDark))
+            ? KeyedSubtree(key: const ValueKey('books'), child: _buildBooksView(isDark, themeProvider.useMaterialYou))
             : KeyedSubtree(key: const ValueKey('settings'), child: _buildSettingsView(context, isDark)),
       ),
       bottomNavigationBar: NavigationBar(
