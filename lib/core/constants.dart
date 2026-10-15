@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 
 class AppConstants {
-  static const String appName = 'FinTrack';
+  static const String appName = 'FinTrax';
+  static const String appTagline = 'YOUR PERSONAL FINANCIAL TRACKER';
   static const String defaultCurrency = '₹';
+
+  // Default Developer Credits
+  static const String developerName = 'Chandan Kumar';
+  static const String defaultGithubId = 'Chand5y';
+  static const String defaultDeveloperEmail = 'chandankumar@example.com';
 
   // Signature Champagne Gold & Midnight Navy (Matches App Icon)
   static const Color goldAccent = Color(0xFFC5A059);
