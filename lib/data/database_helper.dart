@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'book_model.dart';
@@ -94,7 +95,6 @@ class DatabaseHelper {
       LEFT JOIN transactions t ON b.id = t.bookId
       GROUP BY b.id
     ''');
-    // Crucial fix: Clone into a modifiable list so .sort() never crashes!
     return List<Map<String, dynamic>>.from(rawResult);
   }
 
@@ -156,5 +156,106 @@ class DatabaseHelper {
   Future<void> markSmsHandled(String smsId, String status) async {
     final db = await instance.database;
     await db.insert('handled_sms', {'smsId': smsId, 'status': status}, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // --- GOOGLE DRIVE BACKUP & RESTORE SERIALIZATION ---
+  Future<String> exportDatabaseJson() async {
+    final db = await instance.database;
+    final books = await db.query('books');
+    final transactions = await db.query('transactions');
+    final handledSms = await db.query('handled_sms');
+
+    final payload = {
+      'app': 'FinTrax',
+      'version': 1,
+      'exportedAt': DateTime.now().toIso8601String(),
+      'books': books,
+      'transactions': transactions,
+      'handled_sms': handledSms,
+    };
+    return jsonEncode(payload);
+  }
+
+  Future<int> importDatabaseJson(String jsonString) async {
+    final db = await instance.database;
+    final Map<String, dynamic> data = jsonDecode(jsonString) as Map<String, dynamic>;
+    final List<dynamic> booksList = (data['books'] as List<dynamic>?) ?? [];
+    final List<dynamic> txList = (data['transactions'] as List<dynamic>?) ?? [];
+    final List<dynamic> smsList = (data['handled_sms'] as List<dynamic>?) ?? [];
+
+    final Map<int, int> oldBookIdToNewId = {};
+    int restoredBooksCount = 0;
+
+    await db.transaction((txn) async {
+      for (final item in booksList) {
+        if (item is Map) {
+          final int oldId = (item['id'] as num).toInt();
+          final String name = item['name'].toString();
+          final String createdAt = item['createdAt']?.toString() ?? DateTime.now().toIso8601String();
+          final String updatedAt = item['updatedAt']?.toString() ?? createdAt;
+          final int isPinned = (item['isPinned'] as num?)?.toInt() ?? 0;
+
+          final existing = await txn.query('books', where: 'name = ?', whereArgs: [name]);
+          if (existing.isNotEmpty) {
+            final int existingId = (existing.first['id'] as num).toInt();
+            oldBookIdToNewId[oldId] = existingId;
+          } else {
+            final int newId = await txn.insert('books', {
+              'name': name,
+              'createdAt': createdAt,
+              'updatedAt': updatedAt,
+              'isPinned': isPinned,
+            });
+            oldBookIdToNewId[oldId] = newId;
+            restoredBooksCount++;
+          }
+        }
+      }
+
+      for (final item in txList) {
+        if (item is Map) {
+          final int oldBookId = (item['bookId'] as num).toInt();
+          final int? targetBookId = oldBookIdToNewId[oldBookId];
+          if (targetBookId != null) {
+            final String dateStr = item['date']?.toString() ?? '';
+            final double amount = (item['amount'] as num).toDouble();
+            final String name = item['name']?.toString() ?? '';
+
+            // Avoid duplicate transaction entries on multiple restores
+            final dup = await txn.query(
+              'transactions',
+              where: 'bookId = ? AND date = ? AND amount = ? AND name = ?',
+              whereArgs: [targetBookId, dateStr, amount, name],
+            );
+            if (dup.isEmpty) {
+              await txn.insert('transactions', {
+                'bookId': targetBookId,
+                'type': item['type']?.toString() ?? 'Expense',
+                'amount': amount,
+                'name': name,
+                'category': item['category']?.toString() ?? '',
+                'notes': item['notes']?.toString() ?? '',
+                'imagePath': item['imagePath']?.toString() ?? '',
+                'date': dateStr,
+                'currency': item['currency']?.toString() ?? '₹',
+                'paymentMode': item['paymentMode']?.toString() ?? 'Cash',
+              });
+            }
+          }
+        }
+      }
+
+      for (final item in smsList) {
+        if (item is Map && item['smsId'] != null) {
+          await txn.insert(
+            'handled_sms',
+            {'smsId': item['smsId'].toString(), 'status': item['status']?.toString() ?? 'added'},
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+        }
+      }
+    });
+
+    return booksList.isEmpty ? 0 : (restoredBooksCount > 0 ? restoredBooksCount : booksList.length);
   }
 }
