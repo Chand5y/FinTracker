@@ -22,20 +22,175 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrack --org com.chandankumar .
 
-      - name: Configure Native Bridge (SMS, Biometric Lock, Google Drive & Label)
+      - name: Configure Native Bridge (Drive Account, Notifications, Biometrics & PDF Saver)
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
           echo "Using pre-installed NDK: $INSTALLED_NDK"
           sed -i "s/flutter.ndkVersion/\"$INSTALLED_NDK\"/g" android/app/build.gradle*
           sed -i 's/android:label="fintrack"/android:label="FinTrax"/g' android/app/src/main/AndroidManifest.xml
-          sed -i 's/<application/<uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <application/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="true" android:fullBackupOnly="true"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<\/application>/    <receiver android:name=".ReminderReceiver" android:exported="false"\/>\n    <\/application>/' android/app/src/main/AndroidManifest.xml
           mkdir -p android/app/src/main/kotlin/com/chandankumar/fintrack
+
+          cat << 'EOF' > android/app/src/main/kotlin/com/chandankumar/fintrack/ReminderReceiver.kt
+          package com.chandankumar.fintrack
+
+          import android.Manifest
+          import android.app.AlarmManager
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.app.PendingIntent
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.net.Uri
+          import android.os.Build
+          import java.util.Calendar
+
+          class ReminderReceiver : BroadcastReceiver() {
+              override fun onReceive(context: Context, intent: Intent?) {
+                  val channelId = "fintrax_daily_reminder"
+                  val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val channel = NotificationChannel(channelId, "Daily Expense Reminders", NotificationManager.IMPORTANCE_HIGH)
+                      nm.createNotificationChannel(channel)
+                  }
+
+                  val todaySmsCount = countTodayBankSms(context)
+                  val title = if (todaySmsCount > 0) {
+                      "FinTrax • $todaySmsCount Bank Transaction${if (todaySmsCount > 1) "s" else ""} Found"
+                  } else {
+                      "FinTrax • Daily Expense Reminder"
+                  }
+                  val bodyText = if (todaySmsCount > 0) {
+                      "We found $todaySmsCount bank/UPI transaction${if (todaySmsCount > 1) "s" else ""} today. Tap to log them into your book!"
+                  } else {
+                      "Made any expenses or income today? Tap to log today's entries in your book."
+                  }
+
+                  val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                      flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                  }
+                  val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                  } else {
+                      PendingIntent.FLAG_UPDATE_CURRENT
+                  }
+                  val contentPi = PendingIntent.getActivity(context, 2001, launchIntent, piFlags)
+
+                  val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      android.app.Notification.Builder(context, channelId)
+                  } else {
+                      @Suppress("DEPRECATION")
+                      android.app.Notification.Builder(context)
+                  }
+
+                  builder.setSmallIcon(android.R.drawable.ic_dialog_info)
+                      .setContentTitle(title)
+                      .setContentText(bodyText)
+                      .setAutoCancel(true)
+                      .setContentIntent(contentPi)
+
+                  nm.notify(3001, builder.build())
+
+                  // Reschedule for tomorrow
+                  val hour = intent?.getIntExtra("hour", 22) ?: 22
+                  val minute = intent?.getIntExtra("minute", 0) ?: 0
+                  scheduleNext(context, hour, minute)
+              }
+
+              private fun countTodayBankSms(context: Context): Int {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                      context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+                      return 0
+                  }
+                  var count = 0
+                  try {
+                      val cal = Calendar.getInstance().apply {
+                          set(Calendar.HOUR_OF_DAY, 0)
+                          set(Calendar.MINUTE, 0)
+                          set(Calendar.SECOND, 0)
+                          set(Calendar.MILLISECOND, 0)
+                      }
+                      val startOfDay = cal.timeInMillis
+                      val cursor = context.contentResolver.query(
+                          Uri.parse("content://sms/inbox"),
+                          arrayOf("body", "date"),
+                          "date >= ?",
+                          arrayOf(startOfDay.toString()),
+                          "date DESC"
+                      )
+                      val bankRegex = Regex("(a/c|acct|account|bank|upi|vpa|card|debited|credited|spent|paid)", RegexOption.IGNORE_CASE)
+                      val txRegex = Regex("(debited|spent|paid|sent\\s+rs|withdrawn|credited|received)", RegexOption.IGNORE_CASE)
+                      val amtRegex = Regex("(?:rs\\.?|inr|₹)\\s*[0-9,]+", RegexOption.IGNORE_CASE)
+                      cursor?.use {
+                          val bodyIdx = it.getColumnIndex("body")
+                          while (it.moveToNext()) {
+                              val body = if (bodyIdx >= 0) it.getString(bodyIdx) ?: "" else ""
+                              val lower = body.lowercase()
+                              if (!lower.contains("otp") && !lower.contains("verification code") &&
+                                  bankRegex.containsMatchIn(body) && txRegex.containsMatchIn(body) && amtRegex.containsMatchIn(body)) {
+                                  count++
+                              }
+                          }
+                      }
+                  } catch (_: Exception) {}
+                  return count
+              }
+
+              companion object {
+                  fun scheduleNext(context: Context, hour: Int, minute: Int) {
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      val intent = Intent(context, ReminderReceiver::class.java).apply {
+                          putExtra("hour", hour)
+                          putExtra("minute", minute)
+                      }
+                      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      } else {
+                          PendingIntent.FLAG_UPDATE_CURRENT
+                      }
+                      val pi = PendingIntent.getBroadcast(context, 4001, intent, flags)
+                      val cal = Calendar.getInstance().apply {
+                          set(Calendar.HOUR_OF_DAY, hour)
+                          set(Calendar.MINUTE, minute)
+                          set(Calendar.SECOND, 0)
+                          set(Calendar.MILLISECOND, 0)
+                          if (timeInMillis <= System.currentTimeMillis()) {
+                              add(Calendar.DAY_OF_YEAR, 1)
+                          }
+                      }
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                      } else {
+                          am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                      }
+                  }
+
+                  fun cancel(context: Context) {
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      val intent = Intent(context, ReminderReceiver::class.java)
+                      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      } else {
+                          PendingIntent.FLAG_UPDATE_CURRENT
+                      }
+                      val pi = PendingIntent.getBroadcast(context, 4001, intent, flags)
+                      am.cancel(pi)
+                  }
+              }
+          }
+          EOF
+
           cat << 'EOF' > android/app/src/main/kotlin/com/chandankumar/fintrack/MainActivity.kt
           package com.chandankumar.fintrack
 
           import android.Manifest
+          import android.accounts.AccountManager
           import android.app.Activity
           import android.app.KeyguardManager
+          import android.app.backup.BackupManager
           import android.content.Context
           import android.content.Intent
           import android.content.pm.PackageManager
@@ -44,11 +199,29 @@ jobs:
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
+          import java.io.File
 
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "com.chandankumar.fintrack/sms"
               private var pendingResult: MethodChannel.Result? = null
-              private var pendingBackupData: String? = null
+              private var pendingPdfBytes: ByteArray? = null
+
+              private fun getDriveVaultFiles(account: String): List<File> {
+                  val safeName = account.lowercase().replace(Regex("[^a-z0-9._-]"), "_") + "_fintrax_drive.json"
+                  val list = mutableListOf<File>()
+                  try {
+                      val mediaDirs = externalMediaDirs
+                      if (mediaDirs != null && mediaDirs.isNotEmpty() && mediaDirs[0] != null) {
+                          val dir = File(mediaDirs[0], "GoogleDriveBackup")
+                          if (!dir.exists()) dir.mkdirs()
+                          list.add(File(dir, safeName))
+                      }
+                  } catch (_: Exception) {}
+                  val internalDir = File(filesDir, "GoogleDriveBackup")
+                  if (!internalDir.exists()) internalDir.mkdirs()
+                  list.add(File(internalDir, safeName))
+                  return list
+              }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
@@ -115,7 +288,7 @@ jobs:
                               val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
                               if (km.isKeyguardSecure) {
                                   @Suppress("DEPRECATION")
-                                  val intent = km.createConfirmDeviceCredentialIntent("Unlock FinTrax", "Use your fingerprint or screen lock")
+                                  val intent = km.createConfirmDeviceCredentialIntent("Unlock FinTrax", "Use your fingerprint or phone screen lock")
                                   if (intent != null) {
                                       pendingResult = result
                                       startActivityForResult(intent, 1002)
@@ -126,25 +299,89 @@ jobs:
                                   result.success(false)
                               }
                           }
-                          "saveBackupToDrive" -> {
+                          "pickGoogleAccount" -> {
+                              try {
+                                  @Suppress("DEPRECATION")
+                                  val intent = AccountManager.newChooseAccountIntent(
+                                      null,
+                                      null,
+                                      arrayOf("com.google"),
+                                      false,
+                                      null,
+                                      null,
+                                      null,
+                                      null
+                                  )
+                                  pendingResult = result
+                                  startActivityForResult(intent, 1005)
+                              } catch (e: Exception) {
+                                  result.success(null)
+                              }
+                          }
+                          "performDriveBackup" -> {
+                              val account = call.argument<String>("account") ?: ""
                               val jsonContent = call.argument<String>("data") ?: ""
-                              val fileName = call.argument<String>("fileName") ?: "FinTrax_Backup.json"
-                              pendingBackupData = jsonContent
+                              if (account.isEmpty() || jsonContent.isEmpty()) {
+                                  result.success(false)
+                                  return@setMethodCallHandler
+                              }
+                              try {
+                                  for (file in getDriveVaultFiles(account)) {
+                                      file.writeText(jsonContent, Charsets.UTF_8)
+                                  }
+                                  BackupManager(this).dataChanged()
+                                  result.success(true)
+                              } catch (e: Exception) {
+                                  result.success(false)
+                              }
+                          }
+                          "checkDriveBackup" -> {
+                              val account = call.argument<String>("account") ?: ""
+                              if (account.isEmpty()) {
+                                  result.success(null)
+                                  return@setMethodCallHandler
+                              }
+                              var foundContent: String? = null
+                              for (file in getDriveVaultFiles(account)) {
+                                  if (file.exists() && file.length() > 0) {
+                                      try {
+                                          foundContent = file.readText(Charsets.UTF_8)
+                                          break
+                                      } catch (_: Exception) {}
+                                  }
+                              }
+                              result.success(foundContent)
+                          }
+                          "savePdfToDownloads" -> {
+                              val bytes = call.argument<ByteArray>("bytes")
+                              val fileName = call.argument<String>("fileName") ?: "FinTrax_Statement.pdf"
+                              if (bytes == null) {
+                                  result.success(false)
+                                  return@setMethodCallHandler
+                              }
+                              pendingPdfBytes = bytes
                               pendingResult = result
                               val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                                   addCategory(Intent.CATEGORY_OPENABLE)
-                                  type = "application/json"
+                                  type = "application/pdf"
                                   putExtra(Intent.EXTRA_TITLE, fileName)
                               }
-                              startActivityForResult(intent, 1003)
+                              startActivityForResult(intent, 1006)
                           }
-                          "restoreBackupFromDrive" -> {
-                              pendingResult = result
-                              val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                                  addCategory(Intent.CATEGORY_OPENABLE)
-                                  type = "*/*"
+                          "scheduleDailyReminder" -> {
+                              val enabled = call.argument<Boolean>("enabled") ?: true
+                              val hour = call.argument<Int>("hour") ?: 22
+                              val minute = call.argument<Int>("minute") ?: 0
+                              if (enabled) {
+                                  if (Build.VERSION.SDK_INT >= 33 &&
+                                      checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                                      requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1007)
+                                  }
+                                  ReminderReceiver.scheduleNext(this, hour, minute)
+                              } else {
+                                  ReminderReceiver.cancel(this)
                               }
-                              startActivityForResult(intent, 1004)
+                              result.success(true)
                           }
                           "openUrl" -> {
                               val url = call.argument<String>("url") ?: ""
@@ -177,11 +414,20 @@ jobs:
                           pendingResult?.success(resultCode == Activity.RESULT_OK)
                           pendingResult = null
                       }
-                      1003 -> {
-                          if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                      1005 -> {
+                          if (resultCode == Activity.RESULT_OK && data != null) {
+                              val accountName = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)
+                              pendingResult?.success(accountName)
+                          } else {
+                              pendingResult?.success(null)
+                          }
+                          pendingResult = null
+                      }
+                      1006 -> {
+                          if (resultCode == Activity.RESULT_OK && data?.data != null && pendingPdfBytes != null) {
                               try {
                                   contentResolver.openOutputStream(data.data!!)?.use { out ->
-                                      out.write((pendingBackupData ?: "").toByteArray(Charsets.UTF_8))
+                                      out.write(pendingPdfBytes!!)
                                   }
                                   pendingResult?.success(true)
                               } catch (e: Exception) {
@@ -190,20 +436,7 @@ jobs:
                           } else {
                               pendingResult?.success(false)
                           }
-                          pendingBackupData = null
-                          pendingResult = null
-                      }
-                      1004 -> {
-                          if (resultCode == Activity.RESULT_OK && data?.data != null) {
-                              try {
-                                  val content = contentResolver.openInputStream(data.data!!)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
-                                  pendingResult?.success(content)
-                              } catch (e: Exception) {
-                                  pendingResult?.success(null)
-                              }
-                          } else {
-                              pendingResult?.success(null)
-                          }
+                          pendingPdfBytes = null
                           pendingResult = null
                       }
                   }
