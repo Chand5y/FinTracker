@@ -1,5 +1,8 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import '../data/database_helper.dart';
 import '../data/book_model.dart';
@@ -26,11 +29,72 @@ class _BooksScreenState extends State<BooksScreen> {
   List<ParsedSmsTransaction> _smsSuggestions = [];
   bool _isLoading = true;
   BookSort _currentSort = BookSort.updated;
+  Timer? _midnightBackupTimer;
 
   @override
   void initState() {
     super.initState();
     _refreshBooks();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeSchedulesAndAutoBackup();
+    });
+  }
+
+  @override
+  void dispose() {
+    _midnightBackupTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _initializeSchedulesAndAutoBackup() async {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    if (!themeProvider.isInitialized) {
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+    if (!mounted) return;
+
+    // Schedule daily 10:00 PM (or user-customized) notification reminder
+    try {
+      await _smsChannel.invokeMethod('scheduleDailyReminder', {
+        'enabled': themeProvider.dailyReminderEnabled,
+        'hour': themeProvider.reminderHour,
+        'minute': themeProvider.reminderMinute,
+      });
+    } catch (_) {}
+
+    // Perform daily auto-backup if past 12:00 AM midnight
+    await _checkAndRunDailyAutoBackup();
+
+    // Schedule timer for the next 12:05 AM midnight while app is in memory
+    final now = DateTime.now();
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1, 0, 5);
+    _midnightBackupTimer?.cancel();
+    _midnightBackupTimer = Timer(nextMidnight.difference(now), () {
+      _checkAndRunDailyAutoBackup();
+    });
+  }
+
+  Future<void> _checkAndRunDailyAutoBackup() async {
+    final themeProvider = Provider.of<ThemeProvider>(context, listen: false);
+    if (themeProvider.driveAccount.isEmpty) return;
+
+    final now = DateTime.now();
+    final String todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    if (themeProvider.lastAutoBackupDay == todayKey) return;
+
+    try {
+      final String jsonPayload = await DatabaseHelper.instance.exportDatabaseJson();
+      final bool ok = await _smsChannel.invokeMethod('performDriveBackup', {
+        'account': themeProvider.driveAccount,
+        'data': jsonPayload,
+      }) ?? false;
+      if (ok) {
+        await themeProvider.recordBackupSuccess(
+          isoTimestamp: now.toIso8601String(),
+          dayKey: todayKey,
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _refreshBooks() async {
@@ -208,6 +272,7 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  // Long-press Book menu with Share as PDF and Export & Save as PDF
   void _showBookOptions(int bookId, String currentName, int isPinned) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
@@ -247,6 +312,35 @@ class _BooksScreenState extends State<BooksScreen> {
                   HapticFeedback.lightImpact();
                   Navigator.pop(sheetContext);
                   _showEditBookDialog(bookId, currentName);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.share_outlined),
+                title: const Text('Share as PDF'),
+                onTap: () async {
+                  HapticFeedback.mediumImpact();
+                  Navigator.pop(sheetContext);
+                  final bytes = await DashboardScreen.generateBookPdfBytes(bookId, currentName);
+                  await Printing.sharePdf(bytes: bytes, filename: '${currentName}_FinTrax_Statement.pdf');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.download_outlined),
+                title: const Text('Export & Save as PDF'),
+                subtitle: const Text('Save PDF statement to Downloads folder', style: TextStyle(fontSize: 11.5)),
+                onTap: () async {
+                  HapticFeedback.mediumImpact();
+                  Navigator.pop(sheetContext);
+                  final bytes = await DashboardScreen.generateBookPdfBytes(bookId, currentName);
+                  final bool saved = await _smsChannel.invokeMethod('savePdfToDownloads', {
+                    'bytes': bytes,
+                    'fileName': '${currentName}_FinTrax_Statement.pdf',
+                  }) ?? false;
+                  if (mounted && saved) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('PDF saved to Downloads successfully!'), backgroundColor: AppConstants.incomeGreen),
+                    );
+                  }
                 },
               ),
               ListTile(
@@ -365,7 +459,6 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  // Opens AddTransactionScreen pre-filled so the user can edit Remark, Category, or Receipt before saving
   Future<void> _promptBookAndEditSms(ParsedSmsTransaction sms, VoidCallback onAdded) async {
     if (_booksData.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please create a Book first before adding SMS entries.')));
@@ -427,158 +520,193 @@ class _BooksScreenState extends State<BooksScreen> {
     }
   }
 
-  Future<void> _handleDriveBackup() async {
+  // Prompts the native Android Google Account chooser & Drive permission dialog
+  Future<String?> _ensureGoogleDriveAccount(ThemeProvider themeProvider, {bool forceChoose = false}) async {
+    if (themeProvider.driveAccount.isNotEmpty && !forceChoose) {
+      return themeProvider.driveAccount;
+    }
+
+    final String? selectedEmail = await _smsChannel.invokeMethod('pickGoogleAccount');
+    if (selectedEmail == null || selectedEmail.isEmpty || !mounted) return null;
+
+    final bool? granted = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.add_to_drive_rounded, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 10),
+            const Expanded(child: Text('Allow Google Drive Access?', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+          ],
+        ),
+        content: Text(
+          'FinTrax wants permission to store and restore your encrypted ledger backups in Google Drive for:\n\n$selectedEmail\n\n• Automatic daily backup after 12:00 AM\n• Private app-only Drive folder',
+          style: const TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Deny')),
+          FilledButton(onPressed: () => Navigator.pop(dCtx, true), child: const Text('Allow')),
+        ],
+      ),
+    );
+
+    if (granted == true) {
+      await themeProvider.setDriveAccount(selectedEmail);
+      return selectedEmail;
+    }
+    return null;
+  }
+
+  Future<void> _handleDriveBackup(ThemeProvider themeProvider) async {
     HapticFeedback.mediumImpact();
+    final String? account = await _ensureGoogleDriveAccount(themeProvider);
+    if (account == null) return;
+
     try {
       final String jsonPayload = await DatabaseHelper.instance.exportDatabaseJson();
-      final String dateStamp = AppConstants.formatOrdinalDate(DateTime.now()).replaceAll(' ', '_');
-      final bool success = await _smsChannel.invokeMethod('saveBackupToDrive', {
+      final bool success = await _smsChannel.invokeMethod('performDriveBackup', {
+        'account': account,
         'data': jsonPayload,
-        'fileName': 'FinTrax_Backup_$dateStamp.json',
       }) ?? false;
 
-      if (mounted && success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Backup saved to Google Drive successfully!'), backgroundColor: AppConstants.incomeGreen),
+      if (success) {
+        final now = DateTime.now();
+        final String todayKey = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+        await themeProvider.recordBackupSuccess(
+          isoTimestamp: now.toIso8601String(),
+          dayKey: todayKey,
         );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Backed up to Google Drive ($account)'),
+              backgroundColor: AppConstants.incomeGreen,
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Backup cancelled or failed.'), backgroundColor: AppConstants.expenseRed),
+          const SnackBar(content: Text('Google Drive backup failed.'), backgroundColor: AppConstants.expenseRed),
         );
       }
     }
   }
 
-  Future<void> _handleDriveRestore() async {
+  Future<void> _handleDriveRestore(ThemeProvider themeProvider) async {
     HapticFeedback.mediumImpact();
-    try {
-      final String? jsonContent = await _smsChannel.invokeMethod('restoreBackupFromDrive');
-      if (jsonContent == null || jsonContent.isEmpty) return;
+    final String? account = await _ensureGoogleDriveAccount(themeProvider);
+    if (account == null || !mounted) return;
 
-      final int count = await DatabaseHelper.instance.importDatabaseJson(jsonContent);
+    final String? jsonContent = await _smsChannel.invokeMethod('checkDriveBackup', {'account': account});
+    if (!mounted) return;
+
+    if (jsonContent == null || jsonContent.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('No Backup Found', style: TextStyle(fontWeight: FontWeight.w700)),
+          content: Text('No FinTrax backup was found on Google Drive for $account.'),
+          actions: [
+            FilledButton(onPressed: () => Navigator.pop(dCtx), child: const Text('OK')),
+          ],
+        ),
+      );
+      return;
+    }
+
+    String backupTimeFormatted = 'Unknown date';
+    int bookCount = 0;
+    int txCount = 0;
+    try {
+      final Map<String, dynamic> decoded = jsonDecode(jsonContent) as Map<String, dynamic>;
+      final DateTime? expDate = DateTime.tryParse(decoded['exportedAt']?.toString() ?? '');
+      if (expDate != null) {
+        backupTimeFormatted = AppConstants.formatOrdinalDateTime(expDate);
+      }
+      bookCount = ((decoded['books'] as List<dynamic>?) ?? []).length;
+      txCount = ((decoded['transactions'] as List<dynamic>?) ?? []).length;
+    } catch (_) {}
+
+    final bool? confirmRestore = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Google Drive Backup Found', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Text(
+          'Account: $account\nLast Backup: $backupTimeFormatted\nContents: $bookCount Book(s), $txCount Entries\n\nDo you want to restore this backup into FinTrax?',
+          style: const TextStyle(fontSize: 13.5, height: 1.45),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dCtx, true), child: const Text('Restore Now')),
+        ],
+      ),
+    );
+
+    if (confirmRestore == true) {
+      final int restored = await DatabaseHelper.instance.importDatabaseJson(jsonContent);
       await _refreshBooks();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Successfully restored $count book(s) and transactions from Drive!'),
+            content: Text('Restored $restored book(s) from Google Drive ($account)!'),
             backgroundColor: AppConstants.incomeGreen,
           ),
         );
       }
-    } catch (e) {
+    }
+  }
+
+  Future<void> _handleAppLockToggle(ThemeProvider themeProvider, bool enable) async {
+    if (!enable) {
+      await themeProvider.setAppLock(false);
+      return;
+    }
+    final bool isSecure = await _smsChannel.invokeMethod('isDeviceSecure') ?? false;
+    if (!isSecure) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid backup file selected.'), backgroundColor: AppConstants.expenseRed),
+          const SnackBar(content: Text('Please set up a Fingerprint or Screen Lock in your phone settings first.')),
+        );
+      }
+      return;
+    }
+    final bool verified = await _smsChannel.invokeMethod('authenticateDevice') ?? false;
+    if (verified) {
+      HapticFeedback.mediumImpact();
+      await themeProvider.setAppLock(true);
+    }
+  }
+
+  Future<void> _pickReminderTime(ThemeProvider themeProvider) async {
+    HapticFeedback.selectionClick();
+    final TimeOfDay? picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: themeProvider.reminderHour, minute: themeProvider.reminderMinute),
+    );
+    if (picked != null) {
+      await themeProvider.setDailyReminder(
+        enabled: true,
+        hour: picked.hour,
+        minute: picked.minute,
+      );
+      await _smsChannel.invokeMethod('scheduleDailyReminder', {
+        'enabled': true,
+        'hour': picked.hour,
+        'minute': picked.minute,
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Daily reminder set for ${AppConstants.formatTimeOfDay(picked.hour, picked.minute)}')),
         );
       }
     }
   }
 
-  Future<void> _configureAppLockDialog(ThemeProvider themeProvider, bool enable) async {
-    if (!enable) {
-      await themeProvider.setAppLock(false);
-      return;
-    }
-    final TextEditingController pinCtrl = TextEditingController(text: themeProvider.appPin);
-    final bool? confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Set 4-Digit App PIN', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'You can unlock FinTrax using your phone\'s Fingerprint / Biometrics or this 4-digit PIN.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: pinCtrl,
-              autofocus: true,
-              maxLength: 4,
-              keyboardType: TextInputType.number,
-              obscureText: true,
-              decoration: InputDecoration(
-                labelText: '4-Digit PIN',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              final pin = pinCtrl.text.trim();
-              if (pin.length == 4 && int.tryParse(pin) != null) {
-                Navigator.pop(dCtx, true);
-              } else {
-                ScaffoldMessenger.of(dCtx).showSnackBar(const SnackBar(content: Text('Please enter exactly 4 digits.')));
-              }
-            },
-            child: const Text('Enable Lock'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      HapticFeedback.mediumImpact();
-      await themeProvider.setAppLock(true, pin: pinCtrl.text.trim());
-    }
-  }
-
-  void _showEditCreditsDialog(ThemeProvider themeProvider) {
-    HapticFeedback.lightImpact();
-    final TextEditingController githubCtrl = TextEditingController(text: themeProvider.devGithub);
-    final TextEditingController emailCtrl = TextEditingController(text: themeProvider.devEmail);
-
-    showDialog(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Update Developer Contact', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: githubCtrl,
-              decoration: InputDecoration(
-                labelText: 'GitHub Username',
-                prefixText: 'github.com/',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: emailCtrl,
-              keyboardType: TextInputType.emailAddress,
-              decoration: InputDecoration(
-                labelText: 'Developer Email Address',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              await themeProvider.updateDeveloperCredits(email: emailCtrl.text, github: githubCtrl.text);
-              if (dCtx.mounted) Navigator.pop(dCtx);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Brand lockup: "YOUR PERSONAL FINANCIAL TRACKER" scales strictly to the exact width of "FinTrax"
   Widget _buildBrandHeader(bool isDark, bool useMaterialYou) {
     final Color finColor = isDark ? Colors.white : const Color(0xFF0E1726);
     final Color traxColor = useMaterialYou
@@ -618,7 +746,6 @@ class _BooksScreenState extends State<BooksScreen> {
             ],
           ),
           const SizedBox(height: 3),
-          // SizedBox(width: 0) prevents the tagline from inflating IntrinsicWidth, so FittedBox matches "FinTrax" 1:1
           SizedBox(
             width: 0,
             child: FittedBox(
@@ -881,6 +1008,10 @@ class _BooksScreenState extends State<BooksScreen> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     final scheme = Theme.of(context).colorScheme;
 
+    final String lastBackupText = themeProvider.lastBackupIso.isEmpty
+        ? 'Never backed up'
+        : AppConstants.formatOrdinalDateTime(DateTime.tryParse(themeProvider.lastBackupIso) ?? DateTime.now());
+
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
@@ -950,19 +1081,19 @@ class _BooksScreenState extends State<BooksScreen> {
 
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-            child: Text('SECURITY & AUTOMATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+            child: Text('SECURITY, REMINDERS & AUTOMATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
           ),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               SwitchListTile(
                 secondary: Icon(Icons.fingerprint_rounded, color: scheme.primary),
-                title: const Text('App Lock (Fingerprint / PIN)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Require Fingerprint or 4-digit PIN when opening FinTrax', style: TextStyle(fontSize: 12)),
+                title: const Text('App Lock (Fingerprint / Screen Lock)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Unlock FinTrax using your Fingerprint or phone lock screen', style: TextStyle(fontSize: 12)),
                 value: themeProvider.appLockEnabled,
                 onChanged: (val) {
                   HapticFeedback.lightImpact();
-                  _configureAppLockDialog(themeProvider, val);
+                  _handleAppLockToggle(themeProvider, val);
                 },
               ),
               const Divider(height: 1),
@@ -988,6 +1119,47 @@ class _BooksScreenState extends State<BooksScreen> {
                   await _scanSmsIfEnabled();
                 },
               ),
+              const Divider(height: 1),
+              SwitchListTile(
+                secondary: Icon(Icons.notifications_active_outlined, color: scheme.primary),
+                title: const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: Text(
+                  themeProvider.dailyReminderEnabled
+                      ? 'Reminds you daily at ${AppConstants.formatTimeOfDay(themeProvider.reminderHour, themeProvider.reminderMinute)} (includes SMS alerts)'
+                      : 'Daily reminder disabled',
+                  style: const TextStyle(fontSize: 12),
+                ),
+                value: themeProvider.dailyReminderEnabled,
+                onChanged: (val) async {
+                  HapticFeedback.lightImpact();
+                  await themeProvider.setDailyReminder(enabled: val);
+                  await _smsChannel.invokeMethod('scheduleDailyReminder', {
+                    'enabled': val,
+                    'hour': themeProvider.reminderHour,
+                    'minute': themeProvider.reminderMinute,
+                  });
+                },
+              ),
+              if (themeProvider.dailyReminderEnabled) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(Icons.access_time_rounded, color: scheme.primary),
+                  title: const Text('Reminder Time', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                  subtitle: const Text('Tap to customize daily notification time', style: TextStyle(fontSize: 12)),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      AppConstants.formatTimeOfDay(themeProvider.reminderHour, themeProvider.reminderMinute),
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: scheme.primary),
+                    ),
+                  ),
+                  onTap: () => _pickReminderTime(themeProvider),
+                ),
+              ],
             ],
           ),
 
@@ -999,24 +1171,43 @@ class _BooksScreenState extends State<BooksScreen> {
             isDark: isDark,
             children: [
               ListTile(
+                leading: Icon(Icons.account_circle_outlined, color: scheme.primary),
+                title: Text(
+                  themeProvider.driveAccount.isEmpty ? 'Connect Google Account' : themeProvider.driveAccount,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5),
+                ),
+                subtitle: Text(
+                  themeProvider.driveAccount.isEmpty
+                      ? 'Select your logged-in Google account for Drive backup'
+                      : 'Last Backup: $lastBackupText\nAuto-Backup: Daily after 12:00 AM',
+                  style: const TextStyle(fontSize: 11.5, height: 1.35),
+                ),
+                isThreeLine: themeProvider.driveAccount.isNotEmpty,
+                trailing: TextButton(
+                  onPressed: () => _ensureGoogleDriveAccount(themeProvider, forceChoose: true),
+                  child: Text(themeProvider.driveAccount.isEmpty ? 'Connect' : 'Switch'),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
                 leading: Icon(Icons.cloud_upload_outlined, color: scheme.primary),
-                title: const Text('Backup to Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Save all books & transactions to your personal Drive', style: TextStyle(fontSize: 12)),
+                title: const Text('Backup Now to Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Sync all books & entries directly to your Google Drive', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                onTap: _handleDriveBackup,
+                onTap: () => _handleDriveBackup(themeProvider),
               ),
               const Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.cloud_download_outlined, color: scheme.primary),
                 title: const Text('Restore from Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Import your FinTrax backup file from Drive', style: TextStyle(fontSize: 12)),
+                subtitle: const Text('Check Drive for your backup and restore books', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                onTap: _handleDriveRestore,
+                onTap: () => _handleDriveRestore(themeProvider),
               ),
             ],
           ),
 
-          // Concise Privacy Assurance Note
+          // Updated Privacy & Zero-Ads Assurance Note
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             padding: const EdgeInsets.all(14),
@@ -1032,7 +1223,7 @@ class _BooksScreenState extends State<BooksScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    '100% Offline & Private: FinTrax works completely offline. SMS scanning happens strictly on your device, and backups go directly to your personal Google Drive. Your data never reaches anyone else.',
+                    '100% Free, Offline & Ad-Free: FinTrax is completely free, never shows any ads, and never collects or shares your personal data for advertising. All SMS processing happens strictly offline on your device, and backups go only to your personal Google Drive.',
                     style: TextStyle(
                       fontSize: 11.5,
                       height: 1.4,
@@ -1045,50 +1236,42 @@ class _BooksScreenState extends State<BooksScreen> {
             ),
           ),
 
+          // Locked Developer Credits (No Edit button for users)
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text('DEVELOPER CREDITS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
-                GestureDetector(
-                  onTap: () => _showEditCreditsDialog(themeProvider),
-                  child: Text('Edit', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: scheme.primary)),
-                ),
-              ],
-            ),
+            child: Text('DEVELOPER CREDITS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
           ),
           _buildSettingsCard(
             isDark: isDark,
             children: [
-              ListTile(
+              const ListTile(
                 leading: CircleAvatar(
                   backgroundColor: AppConstants.iconNavy,
-                  child: const Text('CK', style: TextStyle(color: AppConstants.goldAccent, fontWeight: FontWeight.w800, fontSize: 13)),
+                  child: Text('CK', style: TextStyle(color: AppConstants.goldAccent, fontWeight: FontWeight.w800, fontSize: 13)),
                 ),
-                title: const Text(AppConstants.developerName, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-                subtitle: const Text('Creator & Lead Developer • FinTrax', style: TextStyle(fontSize: 12)),
+                title: Text(AppConstants.developerName, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                subtitle: Text(AppConstants.developerRole, style: TextStyle(fontSize: 12)),
               ),
               const Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.code_rounded, color: scheme.primary),
                 title: const Text('GitHub', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                subtitle: Text('github.com/${themeProvider.devGithub}', style: const TextStyle(fontSize: 12)),
+                subtitle: const Text('github.com/${AppConstants.defaultGithubId}', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  _smsChannel.invokeMethod('openUrl', {'url': 'https://github.com/${themeProvider.devGithub}'});
+                  _smsChannel.invokeMethod('openUrl', {'url': 'https://github.com/${AppConstants.defaultGithubId}'});
                 },
               ),
               const Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.alternate_email_rounded, color: scheme.primary),
                 title: const Text('Contact Email', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                subtitle: Text(themeProvider.devEmail, style: const TextStyle(fontSize: 12)),
+                subtitle: const Text(AppConstants.defaultDeveloperEmail, style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.mail_outline_rounded, size: 18, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  _smsChannel.invokeMethod('openUrl', {'url': 'mailto:${themeProvider.devEmail}?subject=FinTrax%20Feedback'});
+                  _smsChannel.invokeMethod('openUrl', {'url': 'mailto:${AppConstants.defaultDeveloperEmail}?subject=FinTrax%20Feedback'});
                 },
               ),
             ],
