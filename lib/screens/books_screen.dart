@@ -7,6 +7,7 @@ import '../data/transaction_model.dart';
 import '../core/constants.dart';
 import '../theme/theme_provider.dart';
 import 'dashboard_screen.dart';
+import 'add_transaction_screen.dart';
 
 enum BookSort { updated, created, aToZ, zToA }
 
@@ -341,10 +342,10 @@ class _BooksScreenState extends State<BooksScreen> {
                                       child: const Text('Dismiss', style: TextStyle(color: Colors.grey, fontSize: 12)),
                                     ),
                                     FilledButton.tonal(
-                                      onPressed: () => _promptBookForSms(sms, () {
+                                      onPressed: () => _promptBookAndEditSms(sms, () {
                                         setSheetState(() => _smsSuggestions.removeAt(idx));
                                       }),
-                                      child: const Text('Add to Book', style: TextStyle(fontSize: 12)),
+                                      child: const Text('Review & Add', style: TextStyle(fontSize: 12)),
                                     ),
                                   ],
                                 ),
@@ -364,7 +365,8 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  Future<void> _promptBookForSms(ParsedSmsTransaction sms, VoidCallback onAdded) async {
+  // Opens AddTransactionScreen pre-filled so the user can edit Remark, Category, or Receipt before saving
+  Future<void> _promptBookAndEditSms(ParsedSmsTransaction sms, VoidCallback onAdded) async {
     if (_booksData.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please create a Book first before adding SMS entries.')));
       return;
@@ -376,12 +378,13 @@ class _BooksScreenState extends State<BooksScreen> {
         context: context,
         builder: (dCtx) => SimpleDialog(
           title: const Text('Select Book'),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           children: _booksData.map((b) {
             return SimpleDialogOption(
               onPressed: () => Navigator.pop(dCtx, b['id'] as int),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(b['name'].toString(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                child: Text(b['name'].toString(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
               ),
             );
           }).toList(),
@@ -389,31 +392,196 @@ class _BooksScreenState extends State<BooksScreen> {
       );
     }
 
-    if (chosenBookId != null) {
-      HapticFeedback.mediumImpact();
-      await DatabaseHelper.instance.insertTransaction(
-        TransactionModel(
-          bookId: chosenBookId,
-          type: sms.type,
-          amount: sms.amount,
-          name: sms.merchant,
-          category: '',
-          notes: sms.body,
-          date: sms.date,
-          currency: AppConstants.defaultCurrency,
-          paymentMode: sms.paymentMode,
+    if (chosenBookId != null && mounted) {
+      HapticFeedback.lightImpact();
+      final prefilledDraft = TransactionModel(
+        id: null,
+        bookId: chosenBookId,
+        type: sms.type,
+        amount: sms.amount,
+        name: sms.merchant,
+        category: '',
+        notes: sms.body,
+        date: sms.date,
+        currency: AppConstants.defaultCurrency,
+        paymentMode: sms.paymentMode,
+      );
+
+      final bool? saved = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AddTransactionScreen(
+            bookId: chosenBookId!,
+            type: sms.type,
+            existingTransaction: prefilledDraft,
+            isSmsDraft: true,
+          ),
         ),
       );
-      await DatabaseHelper.instance.markSmsHandled(sms.smsId, 'added');
-      onAdded();
-      _refreshBooks();
+
+      if (saved == true) {
+        await DatabaseHelper.instance.markSmsHandled(sms.smsId, 'added');
+        onAdded();
+        _refreshBooks();
+      }
     }
   }
 
-  // Brand lockup: "FINANCE TRACKER" sits strictly narrower than "FinTrack"
+  Future<void> _handleDriveBackup() async {
+    HapticFeedback.mediumImpact();
+    try {
+      final String jsonPayload = await DatabaseHelper.instance.exportDatabaseJson();
+      final String dateStamp = AppConstants.formatOrdinalDate(DateTime.now()).replaceAll(' ', '_');
+      final bool success = await _smsChannel.invokeMethod('saveBackupToDrive', {
+        'data': jsonPayload,
+        'fileName': 'FinTrax_Backup_$dateStamp.json',
+      }) ?? false;
+
+      if (mounted && success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Backup saved to Google Drive successfully!'), backgroundColor: AppConstants.incomeGreen),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Backup cancelled or failed.'), backgroundColor: AppConstants.expenseRed),
+        );
+      }
+    }
+  }
+
+  Future<void> _handleDriveRestore() async {
+    HapticFeedback.mediumImpact();
+    try {
+      final String? jsonContent = await _smsChannel.invokeMethod('restoreBackupFromDrive');
+      if (jsonContent == null || jsonContent.isEmpty) return;
+
+      final int count = await DatabaseHelper.instance.importDatabaseJson(jsonContent);
+      await _refreshBooks();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Successfully restored $count book(s) and transactions from Drive!'),
+            backgroundColor: AppConstants.incomeGreen,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid backup file selected.'), backgroundColor: AppConstants.expenseRed),
+        );
+      }
+    }
+  }
+
+  Future<void> _configureAppLockDialog(ThemeProvider themeProvider, bool enable) async {
+    if (!enable) {
+      await themeProvider.setAppLock(false);
+      return;
+    }
+    final TextEditingController pinCtrl = TextEditingController(text: themeProvider.appPin);
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Set 4-Digit App PIN', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'You can unlock FinTrax using your phone\'s Fingerprint / Biometrics or this 4-digit PIN.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: pinCtrl,
+              autofocus: true,
+              maxLength: 4,
+              keyboardType: TextInputType.number,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: '4-Digit PIN',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final pin = pinCtrl.text.trim();
+              if (pin.length == 4 && int.tryParse(pin) != null) {
+                Navigator.pop(dCtx, true);
+              } else {
+                ScaffoldMessenger.of(dCtx).showSnackBar(const SnackBar(content: Text('Please enter exactly 4 digits.')));
+              }
+            },
+            child: const Text('Enable Lock'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      HapticFeedback.mediumImpact();
+      await themeProvider.setAppLock(true, pin: pinCtrl.text.trim());
+    }
+  }
+
+  void _showEditCreditsDialog(ThemeProvider themeProvider) {
+    HapticFeedback.lightImpact();
+    final TextEditingController githubCtrl = TextEditingController(text: themeProvider.devGithub);
+    final TextEditingController emailCtrl = TextEditingController(text: themeProvider.devEmail);
+
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Update Developer Contact', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: githubCtrl,
+              decoration: InputDecoration(
+                labelText: 'GitHub Username',
+                prefixText: 'github.com/',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: emailCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: InputDecoration(
+                labelText: 'Developer Email Address',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              await themeProvider.updateDeveloperCredits(email: emailCtrl.text, github: githubCtrl.text);
+              if (dCtx.mounted) Navigator.pop(dCtx);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Brand lockup: "YOUR PERSONAL FINANCIAL TRACKER" scales strictly to the exact width of "FinTrax"
   Widget _buildBrandHeader(bool isDark, bool useMaterialYou) {
     final Color finColor = isDark ? Colors.white : const Color(0xFF0E1726);
-    final Color trackColor = useMaterialYou
+    final Color traxColor = useMaterialYou
         ? Theme.of(context).colorScheme.primary
         : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText);
 
@@ -432,17 +600,17 @@ class _BooksScreenState extends State<BooksScreen> {
                 style: TextStyle(
                   color: finColor,
                   fontWeight: FontWeight.w800,
-                  fontSize: 26,
+                  fontSize: 27,
                   letterSpacing: 0.2,
                   height: 1.0,
                 ),
               ),
               Text(
-                'Track',
+                'Trax',
                 style: TextStyle(
-                  color: trackColor,
+                  color: traxColor,
                   fontWeight: FontWeight.w300,
-                  fontSize: 26,
+                  fontSize: 27,
                   letterSpacing: 0.5,
                   height: 1.0,
                 ),
@@ -450,15 +618,20 @@ class _BooksScreenState extends State<BooksScreen> {
             ],
           ),
           const SizedBox(height: 3),
-          Text(
-            'FINANCE TRACKER',
-            textAlign: TextAlign.justify,
-            style: TextStyle(
-              color: isDark ? Colors.grey[400] : Colors.grey[600],
-              fontSize: 7.2,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 2.3,
-              height: 1.0,
+          // SizedBox(width: 0) prevents the tagline from inflating IntrinsicWidth, so FittedBox matches "FinTrax" 1:1
+          SizedBox(
+            width: 0,
+            child: FittedBox(
+              fit: BoxFit.contain,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                AppConstants.appTagline,
+                style: TextStyle(
+                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
+                ),
+              ),
             ),
           ),
         ],
@@ -607,7 +780,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            // Top Row: Book Title on left + Subtle "Created" Pill on right
                                             Row(
                                               crossAxisAlignment: CrossAxisAlignment.center,
                                               children: [
@@ -638,7 +810,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                               ],
                                             ),
                                             const SizedBox(height: 6),
-                                            // Bottom Row: Updated Date & Time on left + Net Balance on right
                                             Row(
                                               crossAxisAlignment: CrossAxisAlignment.center,
                                               children: [
@@ -695,7 +866,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Widget _buildSettingsCard({required List<Widget> children, required bool isDark}) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       decoration: BoxDecoration(
         color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
         borderRadius: BorderRadius.circular(16),
@@ -713,7 +884,7 @@ class _BooksScreenState extends State<BooksScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.only(top: 8, bottom: 32),
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 4),
@@ -776,17 +947,29 @@ class _BooksScreenState extends State<BooksScreen> {
               ),
             ],
           ),
+
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-            child: Text('AUTOMATION & PRIVACY', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+            child: Text('SECURITY & AUTOMATION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
           ),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               SwitchListTile(
+                secondary: Icon(Icons.fingerprint_rounded, color: scheme.primary),
+                title: const Text('App Lock (Fingerprint / PIN)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Require Fingerprint or 4-digit PIN when opening FinTrax', style: TextStyle(fontSize: 12)),
+                value: themeProvider.appLockEnabled,
+                onChanged: (val) {
+                  HapticFeedback.lightImpact();
+                  _configureAppLockDialog(themeProvider, val);
+                },
+              ),
+              const Divider(height: 1),
+              SwitchListTile(
                 secondary: Icon(Icons.sms_outlined, color: scheme.primary),
                 title: const Text('Smart SMS Auto-Track', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                subtitle: const Text('Detect bank & UPI SMS locally on device to suggest entries (100% offline)', style: TextStyle(fontSize: 12)),
+                subtitle: const Text('Detect bank & UPI SMS on device to suggest entries', style: TextStyle(fontSize: 12)),
                 value: themeProvider.smsAutoTrack,
                 onChanged: (val) async {
                   HapticFeedback.lightImpact();
@@ -807,30 +990,105 @@ class _BooksScreenState extends State<BooksScreen> {
               ),
             ],
           ),
+
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-            child: Text('CLOUD BACKUP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+            child: Text('GOOGLE DRIVE BACKUP', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
           ),
           _buildSettingsCard(
             isDark: isDark,
             children: [
               ListTile(
                 leading: Icon(Icons.cloud_upload_outlined, color: scheme.primary),
-                title: const Text('Google Drive Backup', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                title: const Text('Backup to Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Save all books & transactions to your personal Drive', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google Drive OAuth setup ready for configuration.')));
-                },
+                onTap: _handleDriveBackup,
               ),
               const Divider(height: 1),
               ListTile(
                 leading: Icon(Icons.cloud_download_outlined, color: scheme.primary),
-                title: const Text('Restore from Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                title: const Text('Restore from Google Drive', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                subtitle: const Text('Import your FinTrax backup file from Drive', style: TextStyle(fontSize: 12)),
                 trailing: const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                onTap: _handleDriveRestore,
+              ),
+            ],
+          ),
+
+          // Concise Privacy Assurance Note
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppConstants.incomeGreen.withOpacity(isDark ? 0.12 : 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.3)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.verified_user_outlined, color: AppConstants.incomeGreen, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '100% Offline & Private: FinTrax works completely offline. SMS scanning happens strictly on your device, and backups go directly to your personal Google Drive. Your data never reaches anyone else.',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.4,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.grey[300] : Colors.grey[800],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('DEVELOPER CREDITS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1, color: Colors.grey[500])),
+                GestureDetector(
+                  onTap: () => _showEditCreditsDialog(themeProvider),
+                  child: Text('Edit', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: scheme.primary)),
+                ),
+              ],
+            ),
+          ),
+          _buildSettingsCard(
+            isDark: isDark,
+            children: [
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: AppConstants.iconNavy,
+                  child: const Text('CK', style: TextStyle(color: AppConstants.goldAccent, fontWeight: FontWeight.w800, fontSize: 13)),
+                ),
+                title: const Text(AppConstants.developerName, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                subtitle: const Text('Creator & Lead Developer • FinTrax', style: TextStyle(fontSize: 12)),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.code_rounded, color: scheme.primary),
+                title: const Text('GitHub', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                subtitle: Text('github.com/${themeProvider.devGithub}', style: const TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.open_in_new_rounded, size: 18, color: Colors.grey),
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Google Drive OAuth setup ready for configuration.')));
+                  _smsChannel.invokeMethod('openUrl', {'url': 'https://github.com/${themeProvider.devGithub}'});
+                },
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(Icons.alternate_email_rounded, color: scheme.primary),
+                title: const Text('Contact Email', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                subtitle: Text(themeProvider.devEmail, style: const TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.mail_outline_rounded, size: 18, color: Colors.grey),
+                onTap: () {
+                  HapticFeedback.lightImpact();
+                  _smsChannel.invokeMethod('openUrl', {'url': 'mailto:${themeProvider.devEmail}?subject=FinTrax%20Feedback'});
                 },
               ),
             ],
