@@ -51,6 +51,239 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _imagePath = widget.existingTransaction?.imagePath ?? '';
   }
 
+  String _getEmojiForCategory(String? catName) {
+    if (catName == null || catName.isEmpty) return '🏷️';
+    for (final c in AppConstants.categories) {
+      if (c['name'] == catName) return c['emoji'] ?? '🏷️';
+    }
+    return '🏷️';
+  }
+
+  // Custom Scrollable Card Sheet for Category Selection
+  void _openCategoryPicker(bool isDark) {
+    HapticFeedback.lightImpact();
+    final scheme = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.68),
+          decoration: BoxDecoration(
+            color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Select Category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(sheetCtx),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: ListView(
+                    padding: const EdgeInsets.all(14),
+                    shrinkWrap: true,
+                    children: [
+                      _buildPickerOptionCard(
+                        isDark: isDark,
+                        emoji: '🚫',
+                        title: 'None (No Category)',
+                        isSelected: _selectedCategory == null,
+                        accentColor: scheme.primary,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _selectedCategory = null);
+                          Navigator.pop(sheetCtx);
+                        },
+                      ),
+                      ...AppConstants.categories.map((c) {
+                        final String name = c['name']!;
+                        final String emoji = c['emoji']!;
+                        final bool isSelected = _selectedCategory == name;
+                        return _buildPickerOptionCard(
+                          isDark: isDark,
+                          emoji: emoji,
+                          title: name,
+                          isSelected: isSelected,
+                          accentColor: scheme.primary,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _selectedCategory = name);
+                            Navigator.pop(sheetCtx);
+                          },
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // Custom Scrollable Card Sheet for Payment Method Selection
+  void _openPaymentModePicker(bool isDark) {
+    HapticFeedback.lightImpact();
+    final scheme = Theme.of(context).colorScheme;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) {
+        return Container(
+          margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.65),
+          decoration: BoxDecoration(
+            color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Payment Method', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        onPressed: () => Navigator.pop(sheetCtx),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: ListView(
+                    padding: const EdgeInsets.all(14),
+                    shrinkWrap: true,
+                    children: AppConstants.paymentModes.map((mode) {
+                      final String emoji = AppConstants.paymentModeEmojis[mode] ?? '💳';
+                      final bool isSelected = _paymentMode == mode;
+                      return _buildPickerOptionCard(
+                        isDark: isDark,
+                        emoji: emoji,
+                        title: mode,
+                        isSelected: isSelected,
+                        accentColor: scheme.primary,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _paymentMode = mode);
+                          Navigator.pop(sheetCtx);
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPickerOptionCard({
+    required bool isDark,
+    required String emoji,
+    required String title,
+    required bool isSelected,
+    required Color accentColor,
+    required VoidCallback onTap,
+  }) {
+    final Color cardBg = isSelected
+        ? accentColor.withOpacity(isDark ? 0.18 : 0.12)
+        : (isDark ? const Color(0xFF1A1C22) : const Color(0xFFF8FAFC));
+
+    final Color borderColor = isSelected
+        ? accentColor
+        : (isDark ? AppConstants.borderDark : AppConstants.borderLight);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: borderColor, width: isSelected ? 1.4 : 1.0),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.black.withOpacity(0.35) : Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(emoji, style: const TextStyle(fontSize: 18)),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (isSelected)
+                  Icon(Icons.check_circle_rounded, color: accentColor, size: 22)
+                else
+                  Icon(Icons.circle_outlined, color: Colors.grey.withOpacity(0.35), size: 22),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickImage() async {
     HapticFeedback.selectionClick();
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
@@ -116,6 +349,62 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (mounted) Navigator.pop(context);
   }
 
+  Widget _buildSelectorCard({
+    required bool isDark,
+    required String label,
+    required String valueText,
+    required String emoji,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(emoji, style: const TextStyle(fontSize: 19)),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: Colors.grey[500]),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      valueText,
+                      style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[500]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -141,6 +430,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
               decoration: InputDecoration(
                 labelText: 'Amount (${AppConstants.defaultCurrency})',
+                filled: true,
+                fillColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter an amount' : null,
@@ -151,58 +442,52 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
                 labelText: 'Remark / Title (e.g., Electricity Bill)',
+                filled: true,
+                fillColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _selectedCategory,
-              decoration: InputDecoration(
-                labelText: 'Category (Optional)',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              items: [
-                const DropdownMenuItem<String>(value: null, child: Text('None')),
-                ...AppConstants.categories.map(
-                  (c) => DropdownMenuItem<String>(
-                    value: c['name'],
-                    child: Text('${c['emoji']}  ${c['name']}'),
-                  ),
-                ),
-              ],
-              onChanged: (val) => setState(() => _selectedCategory = val),
+            _buildSelectorCard(
+              isDark: isDark,
+              label: 'Category (Optional)',
+              valueText: _selectedCategory ?? 'None',
+              emoji: _getEmojiForCategory(_selectedCategory),
+              onTap: () => _openCategoryPicker(isDark),
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _paymentMode,
-              decoration: InputDecoration(
-                labelText: 'Payment Method',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              items: AppConstants.paymentModes.map((mode) => DropdownMenuItem(value: mode, child: Text(mode))).toList(),
-              onChanged: (val) => setState(() => _paymentMode = val!),
+            _buildSelectorCard(
+              isDark: isDark,
+              label: 'Payment Method',
+              valueText: _paymentMode,
+              emoji: AppConstants.paymentModeEmojis[_paymentMode] ?? '💳',
+              onTap: () => _openPaymentModePicker(isDark),
             ),
             const SizedBox(height: 16),
-            InkWell(
-              onTap: _pickImage,
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.add_photo_alternate_outlined, color: Theme.of(context).colorScheme.primary),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _imagePath.isEmpty ? 'Attach Receipt or Screenshot' : 'Change Attached Image',
-                        style: const TextStyle(fontWeight: FontWeight.w500),
+            Material(
+              color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: _pickImage,
+                borderRadius: BorderRadius.circular(14),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(Icons.add_photo_alternate_outlined, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _imagePath.isEmpty ? 'Attach Receipt or Screenshot' : 'Change Attached Image',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
