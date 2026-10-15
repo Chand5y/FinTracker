@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../data/database_helper.dart';
@@ -43,43 +44,262 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  String _formatDateTime(DateTime dt) {
-    final month = dt.month.toString().padLeft(2, '0');
-    final day = dt.day.toString().padLeft(2, '0');
-    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
-    final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-    final min = dt.minute.toString().padLeft(2, '0');
-    return "$month/$day/${dt.year}, $hour:$min $amPm";
+  double _calculateTotal(String type) {
+    return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
   }
 
   Future<void> _exportPDF() async {
     HapticFeedback.mediumImpact();
     final pdf = pw.Document();
+
+    final double totalIncome = _calculateTotal('Income');
+    final double totalExpenses = _calculateTotal('Expense');
+    final double netBalance = totalIncome - totalExpenses;
+    final bool isNetNegative = netBalance < 0;
+
+    // Signature PDF Palette
+    const PdfColor navyBg = PdfColor.fromInt(0xFF111C30);
+    const PdfColor goldColor = PdfColor.fromInt(0xFFC5A059);
+    const PdfColor greenText = PdfColor.fromInt(0xFF16A34A);
+    const PdfColor greenBg = PdfColor.fromInt(0xFFECFDF5);
+    const PdfColor redText = PdfColor.fromInt(0xFFDC2626);
+    const PdfColor redBg = PdfColor.fromInt(0xFFFEF2F2);
+    const PdfColor slateBorder = PdfColor.fromInt(0xFFE2E8F0);
+    const PdfColor rowAltBg = PdfColor.fromInt(0xFFF8FAFC);
+    const PdfColor mutedText = PdfColor.fromInt(0xFF64748B);
+
     pdf.addPage(
-      pw.Page(
-        build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('${widget.bookName} Ledger', style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 16),
-              pw.Table.fromTextArray(
-                headers: ['Date', 'Name', 'Category', 'Mode', 'Type', 'Amount'],
-                data: _transactions.map((tx) => [
-                  "${tx.date.month.toString().padLeft(2, '0')}/${tx.date.day.toString().padLeft(2, '0')}/${tx.date.year}",
-                  tx.name,
-                  tx.category.isEmpty ? '-' : tx.category,
-                  tx.paymentMode,
-                  tx.type,
-                  tx.amount.toStringAsFixed(0),
-                ]).toList(),
-              ),
-            ],
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        header: (pw.Context ctx) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            margin: const pw.EdgeInsets.only(bottom: 20),
+            decoration: pw.BoxDecoration(
+              color: navyBg,
+              borderRadius: pw.BorderRadius.circular(12),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Row(
+                      children: [
+                        pw.Text(
+                          'Fin',
+                          style: pw.TextStyle(color: PdfColors.white, fontSize: 24, fontWeight: pw.FontWeight.bold),
+                        ),
+                        pw.Text(
+                          'Track',
+                          style: const pw.TextStyle(color: goldColor, fontSize: 24),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      'FINANCE TRACKER',
+                      style: pw.TextStyle(color: goldColor, fontSize: 7, fontWeight: pw.FontWeight.bold, letterSpacing: 2),
+                    ),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text(
+                      widget.bookName,
+                      style: pw.TextStyle(color: PdfColors.white, fontSize: 16, fontWeight: pw.FontWeight.bold),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      'Generated: ${AppConstants.formatOrdinalDateTime(DateTime.now())}',
+                      style: const pw.TextStyle(color: PdfColor.fromInt(0xFFCBD5E1), fontSize: 9),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           );
+        },
+        footer: (pw.Context ctx) {
+          return pw.Container(
+            margin: const pw.EdgeInsets.only(top: 12),
+            padding: const pw.EdgeInsets.only(top: 8),
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: slateBorder, width: 0.8)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('FinTrack • Personal Finance Statement', style: const pw.TextStyle(color: mutedText, fontSize: 9)),
+                pw.Text('Page ${ctx.pageNumber} of ${ctx.pagesCount}', style: const pw.TextStyle(color: mutedText, fontSize: 9)),
+              ],
+            ),
+          );
+        },
+        build: (pw.Context context) {
+          return [
+            // 3 Executive Summary Cards (Total In, Total Out, Net Balance)
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: pw.Container(
+                    padding: const pw.EdgeInsets.all(12),
+                    decoration: pw.BoxDecoration(
+                      color: greenBg,
+                      borderRadius: pw.BorderRadius.circular(10),
+                      border: pw.Border.all(color: greenText, width: 0.8),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('TOTAL CASH IN (+)', style: pw.TextStyle(color: greenText, fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 6),
+                        pw.Text('+ Rs. ${totalIncome.toStringAsFixed(0)}', style: pw.TextStyle(color: greenText, fontSize: 15, fontWeight: pw.FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+                pw.SizedBox(width: 12),
+                pw.Expanded(
+                  child: pw.Container(
+                    padding: const pw.EdgeInsets.all(12),
+                    decoration: pw.BoxDecoration(
+                      color: redBg,
+                      borderRadius: pw.BorderRadius.circular(10),
+                      border: pw.Border.all(color: redText, width: 0.8),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('TOTAL CASH OUT (-)', style: pw.TextStyle(color: redText, fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 6),
+                        pw.Text('- Rs. ${totalExpenses.toStringAsFixed(0)}', style: pw.TextStyle(color: redText, fontSize: 15, fontWeight: pw.FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+                pw.SizedBox(width: 12),
+                pw.Expanded(
+                  child: pw.Container(
+                    padding: const pw.EdgeInsets.all(12),
+                    decoration: pw.BoxDecoration(
+                      color: isNetNegative ? redBg : greenBg,
+                      borderRadius: pw.BorderRadius.circular(10),
+                      border: pw.Border.all(color: isNetNegative ? redText : greenText, width: 1.2),
+                    ),
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('NET BALANCE', style: pw.TextStyle(color: navyBg, fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 6),
+                        pw.Text(
+                          '${isNetNegative ? '-' : '+'} Rs. ${netBalance.abs().toStringAsFixed(0)}',
+                          style: pw.TextStyle(
+                            color: isNetNegative ? redText : greenText,
+                            fontSize: 15,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+            pw.Text(
+              'Transaction History (${_transactions.length} ${_transactions.length == 1 ? 'Entry' : 'Entries'})',
+              style: pw.TextStyle(color: navyBg, fontSize: 12, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 8),
+
+            // Color-Coded Ledger Table
+            pw.Table(
+              border: pw.TableBorder.all(color: slateBorder, width: 0.6),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(2.3),
+                1: const pw.FlexColumnWidth(2.6),
+                2: const pw.FlexColumnWidth(1.8),
+                3: const pw.FlexColumnWidth(1.4),
+                4: const pw.FlexColumnWidth(1.8),
+              },
+              children: [
+                // Table Header
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: navyBg),
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Date & Time', style: pw.TextStyle(color: goldColor, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Remark / Particulars', style: pw.TextStyle(color: goldColor, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Category', style: pw.TextStyle(color: goldColor, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Method', style: pw.TextStyle(color: goldColor, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Text('Amount', textAlign: pw.TextAlign.right, style: pw.TextStyle(color: goldColor, fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                // Table Data Rows
+                ...List.generate(_transactions.length, (idx) {
+                  final tx = _transactions[idx];
+                  final bool isIncome = tx.type == 'Income';
+                  return pw.TableRow(
+                    decoration: pw.BoxDecoration(color: idx.isEven ? PdfColors.white : rowAltBg),
+                    children: [
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(AppConstants.formatOrdinalDateTime(tx.date), style: const pw.TextStyle(fontSize: 8.5, color: mutedText)),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(tx.name, style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: navyBg)),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(tx.category.isEmpty ? '-' : tx.category, style: const pw.TextStyle(fontSize: 8.5, color: mutedText)),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(tx.paymentMode, style: const pw.TextStyle(fontSize: 8.5, color: navyBg)),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.Text(
+                          '${isIncome ? '+' : '-'} Rs. ${tx.amount.toStringAsFixed(0)}',
+                          textAlign: pw.TextAlign.right,
+                          style: pw.TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: pw.FontWeight.bold,
+                            color: isIncome ? greenText : redText,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+              ],
+            ),
+          ];
         },
       ),
     );
-    await Printing.sharePdf(bytes: await pdf.save(), filename: '${widget.bookName}_ledger.pdf');
+
+    await Printing.sharePdf(bytes: await pdf.save(), filename: '${widget.bookName}_Statement.pdf');
   }
 
   void _showTransactionOptions(TransactionModel tx) {
@@ -118,10 +338,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  double _calculateTotal(String type) {
-    return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -135,7 +351,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: Text(widget.bookName),
         actions: [
           IconButton(
-            tooltip: 'Export PDF',
+            tooltip: 'Export PDF Statement',
             icon: const Icon(Icons.picture_as_pdf_outlined),
             onPressed: _exportPDF,
           ),
@@ -258,12 +474,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           borderRadius: BorderRadius.circular(6),
                                         ),
                                         child: Text(
-                                          tx.paymentMode,
-                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                          '${AppConstants.paymentModeEmojis[tx.paymentMode] ?? '💳'} ${tx.paymentMode}',
+                                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
-                                      Text(_formatDateTime(tx.date), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                                      Text(AppConstants.formatOrdinalDateTime(tx.date), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                                       const Spacer(),
                                       if (hasImage) Icon(Icons.attachment_rounded, size: 16, color: Colors.grey[500]),
                                     ],
