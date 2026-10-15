@@ -158,6 +158,16 @@ class DatabaseHelper {
     await db.insert('handled_sms', {'smsId': smsId, 'status': status}, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  Future<void> markMultipleSmsHandled(List<String> smsIds, String status) async {
+    if (smsIds.isEmpty) return;
+    final db = await instance.database;
+    final batch = db.batch();
+    for (final id in smsIds) {
+      batch.insert('handled_sms', {'smsId': id, 'status': status}, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
   // --- GOOGLE DRIVE BACKUP & RESTORE SERIALIZATION ---
   Future<String> exportDatabaseJson() async {
     final db = await instance.database;
@@ -221,7 +231,6 @@ class DatabaseHelper {
             final double amount = (item['amount'] as num).toDouble();
             final String name = item['name']?.toString() ?? '';
 
-            // Avoid duplicate transaction entries on multiple restores
             final dup = await txn.query(
               'transactions',
               where: 'bookId = ? AND date = ? AND amount = ? AND name = ?',
