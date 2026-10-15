@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
@@ -13,47 +14,11 @@ class DashboardScreen extends StatefulWidget {
   final String bookName;
   const DashboardScreen({Key? key, required this.bookId, required this.bookName}) : super(key: key);
 
-  @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
-}
-
-class _DashboardScreenState extends State<DashboardScreen> {
-  List<TransactionModel> _transactions = [];
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _refreshTransactions();
-  }
-
-  Future<void> _refreshTransactions() async {
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-    try {
-      final data = await DatabaseHelper.instance.readTransactionsForBook(widget.bookId);
-      if (mounted) {
-        setState(() => _transactions = data);
-      }
-    } catch (e) {
-      debugPrint('Error loading transactions: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  double _calculateTotal(String type) {
-    return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
-  }
-
-  Future<void> _exportPDF() async {
-    HapticFeedback.mediumImpact();
-    final pdf = pw.Document();
-
-    final double totalIncome = _calculateTotal('Income');
-    final double totalExpenses = _calculateTotal('Expense');
+  /// Generates branded FinTrax PDF bytes for any book (used for both Share & Export to Downloads)
+  static Future<Uint8List> generateBookPdfBytes(int bookId, String bookName) async {
+    final List<TransactionModel> transactions = await DatabaseHelper.instance.readTransactionsForBook(bookId);
+    final double totalIncome = transactions.where((t) => t.type == 'Income').fold(0.0, (s, i) => s + i.amount);
+    final double totalExpenses = transactions.where((t) => t.type == 'Expense').fold(0.0, (s, i) => s + i.amount);
     final double netBalance = totalIncome - totalExpenses;
     final bool isNetNegative = netBalance < 0;
 
@@ -67,6 +32,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     const PdfColor rowAltBg = PdfColor.fromInt(0xFFF8FAFC);
     const PdfColor mutedText = PdfColor.fromInt(0xFF64748B);
 
+    final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -101,7 +67,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     pw.SizedBox(height: 2),
                     pw.Text(
                       AppConstants.appTagline,
-                      style: pw.TextStyle(color: goldColor, fontSize: 5.5, fontWeight: pw.FontWeight.bold, letterSpacing: 0.8),
+                      style: pw.TextStyle(color: goldColor, fontSize: 6.2, fontWeight: pw.FontWeight.bold, letterSpacing: 1.1),
                     ),
                   ],
                 ),
@@ -109,7 +75,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text(
-                      widget.bookName,
+                      bookName,
                       style: pw.TextStyle(color: PdfColors.white, fontSize: 16, fontWeight: pw.FontWeight.bold),
                     ),
                     pw.SizedBox(height: 4),
@@ -210,11 +176,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             pw.SizedBox(height: 16),
             pw.Text(
-              'Transaction History (${_transactions.length} ${_transactions.length == 1 ? 'Entry' : 'Entries'})',
+              'Transaction History (${transactions.length} ${transactions.length == 1 ? 'Entry' : 'Entries'})',
               style: pw.TextStyle(color: navyBg, fontSize: 12, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 8),
-
             pw.Table(
               border: pw.TableBorder.all(color: slateBorder, width: 0.6),
               columnWidths: {
@@ -250,8 +215,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
-                ...List.generate(_transactions.length, (idx) {
-                  final tx = _transactions[idx];
+                ...List.generate(transactions.length, (idx) {
+                  final tx = transactions[idx];
                   final bool isIncome = tx.type == 'Income';
                   return pw.TableRow(
                     decoration: pw.BoxDecoration(color: idx.isEven ? PdfColors.white : rowAltBg),
@@ -294,7 +259,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
 
-    await Printing.sharePdf(bytes: await pdf.save(), filename: '${widget.bookName}_FinTrax_Statement.pdf');
+    return pdf.save();
+  }
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  List<TransactionModel> _transactions = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshTransactions();
+  }
+
+  Future<void> _refreshTransactions() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      final data = await DatabaseHelper.instance.readTransactionsForBook(widget.bookId);
+      if (mounted) {
+        setState(() => _transactions = data);
+      }
+    } catch (e) {
+      debugPrint('Error loading transactions: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  double _calculateTotal(String type) {
+    return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
+  }
+
+  Future<void> _exportPDF() async {
+    HapticFeedback.mediumImpact();
+    final bytes = await DashboardScreen.generateBookPdfBytes(widget.bookId, widget.bookName);
+    await Printing.sharePdf(bytes: bytes, filename: '${widget.bookName}_FinTrax_Statement.pdf');
   }
 
   void _showTransactionOptions(TransactionModel tx) {
@@ -346,7 +352,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: Text(widget.bookName),
         actions: [
           IconButton(
-            tooltip: 'Export PDF Statement',
+            tooltip: 'Share PDF Statement',
             icon: const Icon(Icons.picture_as_pdf_outlined),
             onPressed: _exportPDF,
           ),
