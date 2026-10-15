@@ -120,40 +120,20 @@ class _AppLockGateState extends State<AppLockGate> {
 
   bool _unlocked = false;
   bool _promptTriggered = false;
-  String _enteredPin = '';
-  String _errorMessage = '';
 
   Future<void> _triggerBiometricUnlock() async {
     try {
       final bool isSecure = await _channel.invokeMethod('isDeviceSecure') ?? false;
-      if (!isSecure) return;
+      if (!isSecure) {
+        if (mounted) setState(() => _unlocked = true);
+        return;
+      }
       final bool ok = await _channel.invokeMethod('authenticateDevice') ?? false;
       if (ok && mounted) {
         HapticFeedback.mediumImpact();
         setState(() => _unlocked = true);
       }
     } catch (_) {}
-  }
-
-  void _onDigitPress(String digit, String savedPin) {
-    HapticFeedback.selectionClick();
-    if (_enteredPin.length >= 4) return;
-    setState(() {
-      _errorMessage = '';
-      _enteredPin += digit;
-    });
-    if (_enteredPin.length == 4) {
-      if (_enteredPin == savedPin) {
-        HapticFeedback.mediumImpact();
-        setState(() => _unlocked = true);
-      } else {
-        HapticFeedback.heavyImpact();
-        setState(() {
-          _enteredPin = '';
-          _errorMessage = 'Incorrect PIN. Try again.';
-        });
-      }
-    }
   }
 
   @override
@@ -177,125 +157,46 @@ class _AppLockGateState extends State<AppLockGate> {
 
     return Scaffold(
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: AppConstants.iconNavy,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 1.5),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    color: AppConstants.iconNavy,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 1.5),
+                  ),
+                  child: const Icon(Icons.fingerprint_rounded, color: AppConstants.goldAccent, size: 48),
                 ),
-                child: const Icon(Icons.lock_outline_rounded, color: AppConstants.goldAccent, size: 32),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('Fin', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF0E1726))),
-                  Text('Trax', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w300, color: gold)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text('Enter your 4-digit PIN or use Fingerprint', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
-              const SizedBox(height: 28),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(4, (index) {
-                  final bool filled = index < _enteredPin.length;
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    margin: const EdgeInsets.symmetric(horizontal: 10),
-                    width: 16,
-                    height: 16,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: filled ? gold : Colors.transparent,
-                      border: Border.all(color: filled ? gold : Colors.grey.withOpacity(0.5), width: 2),
-                    ),
-                  );
-                }),
-              ),
-              if (_errorMessage.isNotEmpty) ...[
-                const SizedBox(height: 14),
-                Text(_errorMessage, style: const TextStyle(color: AppConstants.expenseRed, fontSize: 12, fontWeight: FontWeight.w600)),
-              ],
-              const Spacer(),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 280),
-                child: Column(
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    for (final row in [
-                      ['1', '2', '3'],
-                      ['4', '5', '6'],
-                      ['7', '8', '9'],
-                    ])
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: row.map((digit) {
-                            return _buildPinKey(
-                              label: digit,
-                              isDark: isDark,
-                              onTap: () => _onDigitPress(digit, themeProvider.appPin),
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        IconButton(
-                          iconSize: 28,
-                          tooltip: 'Unlock with Fingerprint / Screen Lock',
-                          onPressed: _triggerBiometricUnlock,
-                          icon: Icon(Icons.fingerprint_rounded, color: gold),
-                        ),
-                        _buildPinKey(
-                          label: '0',
-                          isDark: isDark,
-                          onTap: () => _onDigitPress('0', themeProvider.appPin),
-                        ),
-                        IconButton(
-                          iconSize: 24,
-                          onPressed: () {
-                            if (_enteredPin.isNotEmpty) {
-                              HapticFeedback.selectionClick();
-                              setState(() => _enteredPin = _enteredPin.substring(0, _enteredPin.length - 1));
-                            }
-                          },
-                          icon: Icon(Icons.backspace_outlined, color: Colors.grey[500]),
-                        ),
-                      ],
-                    ),
+                    Text('Fin', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF0E1726))),
+                    Text('Trax', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w300, color: gold)),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPinKey({required String label, required bool isDark, required VoidCallback onTap}) {
-    return Material(
-      color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
-      shape: CircleBorder(side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight)),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          width: 68,
-          height: 68,
-          child: Center(
-            child: Text(label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Text(
+                  'FinTrax is locked for your privacy',
+                  style: TextStyle(fontSize: 13.5, color: Colors.grey[500]),
+                ),
+                const SizedBox(height: 32),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: _triggerBiometricUnlock,
+                  icon: const Icon(Icons.lock_open_rounded),
+                  label: const Text('Unlock with Fingerprint / PIN', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                ),
+              ],
+            ),
           ),
         ),
       ),
