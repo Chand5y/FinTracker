@@ -639,21 +639,38 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
+    Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
+    AppLogger.instance.log('Initiating Google Sign-In flow (switchAccount: $switchAccount)...');
     try {
       if (switchAccount) {
+        AppLogger.instance.log('Signing out existing Google user session...');
         await _googleAuth.signOut();
       }
       GoogleSignInAccount? user = _googleAuth.currentUser;
+      AppLogger.instance.log('Current Google user in memory: ${user?.email ?? "None"}');
+      
       if (user == null && !switchAccount) {
+        AppLogger.instance.log('Attempting signInSilently()...');
         user = await _googleAuth.signInSilently();
+        AppLogger.instance.log('signInSilently result: ${user?.email ?? "Null"}');
       }
-      user ??= await _googleAuth.signIn();
+      
+      if (user == null) {
+        AppLogger.instance.log('Launching interactive signIn() prompt...');
+        user = await _googleAuth.signIn();
+        AppLogger.instance.log('Interactive signIn result: ${user?.email ?? "Cancelled by user"}');
+      }
+
       if (user == null) return null;
+
+      AppLogger.instance.log('Successfully authenticated as ${user.email}. Fetching auth headers...');
+      final headers = await user.authHeaders;
+      AppLogger.instance.log('Auth headers acquired successfully. Token count: ${headers.keys.length}');
 
       await prefs.setDriveAccount(user.email);
       return user;
     } on PlatformException catch (e) {
+      AppLogger.instance.log('PLATFORM ERROR (${e.code}): ${e.message} | Details: ${e.details}');
       if (mounted) {
         _showErrorModal(
           'Google Sign-In Blocked (${e.code})',
@@ -661,11 +678,13 @@ class _BooksScreenState extends State<BooksScreen> {
         );
       }
       return null;
-    } catch (e) {
+    } catch (e, stack) {
+      AppLogger.instance.log('UNKNOWN EXCEPTION: $e\nStack: $stack');
       if (mounted) _showErrorModal('Sign-In Error', e.toString());
       return null;
     }
-  }
+    }
+  
 
   Future<String?> _locateBackupFileId(Map<String, String> headers) async {
     final uri = Uri.https('www.googleapis.com', '/drive/v3/files', {
@@ -1473,6 +1492,7 @@ class _BooksScreenState extends State<BooksScreen> {
               },
             ),
             const Divider(height: 1),
+                        const Divider(height: 1),
             ListTile(
               dense: true,
               leading: Icon(Icons.alternate_email_rounded, color: scheme.primary, size: 20),
@@ -1484,10 +1504,24 @@ class _BooksScreenState extends State<BooksScreen> {
                 _nativeBridge.invokeMethod('openUrl', {'url': 'mailto:${AppConstants.defaultDeveloperEmail}?subject=FinTrax%20Feedback'});
               },
             ),
+            const Divider(height: 1),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.bug_report_rounded, color: scheme.primary, size: 20),
+              title: const Text('Diagnostic Logs', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+              subtitle: const Text('View and export backend error traces', style: TextStyle(fontSize: 11.5)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+              onTap: () {
+                HapticFeedback.lightImpact();
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const DebugLogsScreen()));
+              },
+            ),
           ]),
         ],
       ),
     );
+  }
+
   }
 
   @override
