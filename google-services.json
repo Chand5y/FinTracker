@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "174741660325",
+    "project_id": "alien-button-450406-r7",
+    "storage_bucket": "alien-button-450406-r7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:174741660325:android:6b0b96a64473b0a5baa34c",
+        "android_client_info": {
+          "package_name": "com.chandsy.fintrax"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDQZHngElz6yffvIeQ_uLwHsD7glwOBz04"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
