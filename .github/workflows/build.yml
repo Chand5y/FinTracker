@@ -43,6 +43,28 @@ jobs:
       - name: Generate Android configuration files (com.chandsy.fintrax)
         run: flutter create --project-name fintrax --org com.chandsy .
 
+      - name: Inject google-services.json & Configure Google Services Plugin
+        run: |
+          if [ -f "google-services.json" ]; then
+            cp google-services.json android/app/google-services.json
+            echo "Copied google-services.json into android/app/google-services.json"
+          else
+            echo "ERROR: google-services.json not found in repository root!"
+            exit 1
+          fi
+
+          if [ -f "android/settings.gradle.kts" ]; then
+            sed -i 's/plugins {/plugins {\n    id("com.google.gms.google-services") version "4.4.2" apply false/' android/settings.gradle.kts
+          elif [ -f "android/settings.gradle" ]; then
+            sed -i 's/plugins {/plugins {\n    id "com.google.gms.google-services" version "4.4.2" apply false/' android/settings.gradle
+          fi
+
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/id("com.android.application")/id("com.android.application")\n    id("com.google.gms.google-services")/' android/app/build.gradle.kts
+          elif [ -f "android/app/build.gradle" ]; then
+            sed -i 's/id "com.android.application"/id "com.android.application"\n    id "com.google.gms.google-services"/' android/app/build.gradle
+          fi
+
       - name: Configure Native Bridge (com.chandsy.fintrax)
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
@@ -153,7 +175,7 @@ jobs:
                                   bankRegex.containsMatchIn(body) && txRegex.containsMatchIn(body) && amtRegex.containsMatchIn(body)) {
                                   count++
                               }
-                      }
+                          }
                       }
                   } catch (_: Exception) {}
                   return count
@@ -393,7 +415,7 @@ jobs:
       - name: Sign APK with Permanent Key & Verify SHA-1
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          $APKSIGNER sign --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
           $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
