@@ -39,8 +39,6 @@ jobs:
             git commit -m "Lock permanent Android signing key for Google Drive OAuth" || true
             git push || true
           fi
-          mkdir -p ~/.android
-          cp fintrax.jks ~/.android/debug.keystore
           
       - name: Generate Android configuration files (com.chandsy.fintrax)
         run: flutter create --project-name fintrax --org com.chandsy .
@@ -155,7 +153,7 @@ jobs:
                                   bankRegex.containsMatchIn(body) && txRegex.containsMatchIn(body) && amtRegex.containsMatchIn(body)) {
                                   count++
                               }
-                          }
+                      }
                       }
                   } catch (_: Exception) {}
                   return count
@@ -392,10 +390,11 @@ jobs:
       - name: Build Lightweight Split APK
         run: flutter build apk --release --split-per-abi
 
-      - name: Verify Built APK Certificate SHA-1
+      - name: Sign APK with Permanent Key & Verify SHA-1
         run: |
-          echo "=========================================================="
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          echo "=========================================================="
           $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
       
