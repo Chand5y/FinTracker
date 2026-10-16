@@ -28,6 +28,10 @@ class _BooksScreenState extends State<BooksScreen> {
   static const String _driveAppDataScope = 'https://www.googleapis.com/auth/drive.appdata';
   static const String _backupFileName = 'fintrax_cloud_backup.json';
 
+  final GoogleSignIn _googleAuth = GoogleSignIn(
+    scopes: <String>[_driveAppDataScope],
+  );
+
   int _tabIndex = 0;
   List<Map<String, dynamic>> _books = [];
   List<ParsedSmsTransaction> _pendingSms = [];
