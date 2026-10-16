@@ -23,7 +23,7 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Lock Permanent Signing Key into Native Android Keystore
+      - name: Setup Permanent Signing Key
         run: |
           if [ ! -f "fintrax.jks" ]; then
             echo "Generating permanent FinTrax signing key..."
@@ -36,16 +36,14 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add fintrax.jks
-            git commit -m "Lock permanent Android signing key for Google Drive OAuth" || true
+            git commit -m "Lock permanent Android signing key" || true
             git push || true
           fi
-          mkdir -p ~/.android
-          cp fintrax.jks ~/.android/debug.keystore
           
-      - name: Generate Android configuration files (com.chandsy.fintrax)
+      - name: Generate Android configuration files
         run: flutter create --project-name fintrax --org com.chandsy .
 
-      - name: Configure Native Bridge (com.chandsy.fintrax)
+      - name: Configure Native Bridge
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
           echo "Using pre-installed NDK: $INSTALLED_NDK"
@@ -392,9 +390,10 @@ jobs:
       - name: Build Lightweight Split APK
         run: flutter build apk --release --split-per-abi
 
-      - name: Verify Built APK Certificate SHA-1
+      - name: Sign APK with Permanent Key & Verify SHA-1
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
           $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
