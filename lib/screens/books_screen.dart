@@ -85,7 +85,7 @@ class AppLogger {
     final combined = '$code $rawMessage';
     if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
       return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the OAuth handshake. '
-          ' Note: Changes in Google Cloud Console (like removing the App Logo or updating OAuth clients) '
+          'Note: Changes in Google Cloud Console (such as removing the App Logo or updating OAuth clients) '
           'can take 5 to 30 minutes to propagate across Google servers.';
     }
     if (combined.contains('12500:')) {
@@ -270,6 +270,430 @@ class DebugLogsScreen extends StatelessWidget {
 }
 
 // ===========================================================================
+// FIRST-INSTALL FRIENDLY FINANCIAL COACH ONBOARDING SCREEN
+// ===========================================================================
+class WelcomeOnboardingScreen extends StatefulWidget {
+  final MethodChannel nativeBridge;
+  final VoidCallback onFinished;
+
+  const WelcomeOnboardingScreen({
+    Key? key,
+    required this.nativeBridge,
+    required this.onFinished,
+  }) : super(key: key);
+
+  @override
+  State<WelcomeOnboardingScreen> createState() => _WelcomeOnboardingScreenState();
+}
+
+class _WelcomeOnboardingScreenState extends State<WelcomeOnboardingScreen> {
+  int _step = 0; // 0 = Welcome & Purpose, 1 = Notification Coach, 2 = Reassuring SMS Setup
+  int _selectedHour = 21; // Default 9:00 PM
+  int _selectedMinute = 0;
+
+  Future<void> _pickCustomTime() async {
+    HapticFeedback.selectionClick();
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _selectedHour, minute: _selectedMinute),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedHour = picked.hour;
+        _selectedMinute = picked.minute;
+      });
+    }
+  }
+
+  Future<void> _handleEnableNotifications(ThemeProvider prefs) async {
+    HapticFeedback.mediumImpact();
+    try {
+      await widget.nativeBridge.invokeMethod<bool>('requestNotificationPermission');
+    } catch (_) {}
+    await prefs.setDailyReminder(enabled: true, hour: _selectedHour, minute: _selectedMinute);
+    try {
+      await widget.nativeBridge.invokeMethod('scheduleDailyReminder', {
+        'enabled': true,
+        'hour': _selectedHour,
+        'minute': _selectedMinute,
+      });
+    } catch (_) {}
+    if (mounted) setState(() => _step = 2);
+  }
+
+  Future<void> _handleSkipNotifications(ThemeProvider prefs) async {
+    HapticFeedback.lightImpact();
+    await prefs.setDailyReminder(enabled: false, hour: _selectedHour, minute: _selectedMinute);
+    try {
+      await widget.nativeBridge.invokeMethod('scheduleDailyReminder', {
+        'enabled': false,
+        'hour': _selectedHour,
+        'minute': _selectedMinute,
+      });
+    } catch (_) {}
+    if (mounted) setState(() => _step = 2);
+  }
+
+  Future<void> _handleEnableSms(ThemeProvider prefs) async {
+    HapticFeedback.mediumImpact();
+    bool granted = false;
+    try {
+      granted = await widget.nativeBridge.invokeMethod<bool>('requestSmsPermission') ?? false;
+    } catch (_) {}
+    await prefs.setSmsAutoTrack(granted);
+    await DatabaseHelper.instance.markSmsHandled('__onboarding_completed_v1__', 'done');
+    widget.onFinished();
+  }
+
+  Future<void> _handleSkipSms(ThemeProvider prefs) async {
+    HapticFeedback.lightImpact();
+    await prefs.setSmsAutoTrack(false);
+    await DatabaseHelper.instance.markSmsHandled('__onboarding_completed_v1__', 'done');
+    widget.onFinished();
+  }
+
+  Widget _featureTile({
+    required bool isDark,
+    required IconData icon,
+    required Color accent,
+    required String title,
+    required String subtitle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: accent.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: accent, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: TextStyle(fontSize: 12.5, height: 1.4, color: isDark ? Colors.grey[400] : Colors.grey[700]),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStep0Welcome(bool isDark, Color accent) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(0.14),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            'WELCOME TO YOUR FINANCIAL COMPANION',
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: accent),
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Text(
+              'Fin',
+              style: TextStyle(
+                color: isDark ? Colors.white : const Color(0xFF0E1726),
+                fontWeight: FontWeight.w900,
+                fontSize: 34,
+              ),
+            ),
+            Text(
+              'Trax',
+              style: TextStyle(color: accent, fontWeight: FontWeight.w300, fontSize: 34),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Most of us work hard for our money, yet at the end of the month we still wonder, "Where did it all go?" FinTrax was built to replace that guesswork with effortless clarity.',
+          style: TextStyle(fontSize: 13.5, height: 1.48, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+        ),
+        const SizedBox(height: 18),
+        _featureTile(
+          isDark: isDark,
+          icon: Icons.menu_book_rounded,
+          accent: accent,
+          title: 'Dedicated Books & Lending (Udhaar) Ledgers',
+          subtitle: 'Create separate books for Monthly Expenses, Groceries, Shopping, or Money Lent to friends—and even log a single entry into multiple books at once.',
+        ),
+        _featureTile(
+          isDark: isDark,
+          icon: Icons.insights_rounded,
+          accent: accent,
+          title: 'Monthly Financial Insights & PDF Statements',
+          subtitle: 'See exactly how much went into Shopping, Groceries, and Savings on the 1st of every month, and export clean PDF statements anytime.',
+        ),
+        Container(
+          margin: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppConstants.incomeGreen.withOpacity(isDark ? 0.12 : 0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.35)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '100% Offline • Zero Data Collection • Zero Ads • Forever Free',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'FinTrax works completely offline on your phone. We have no servers, we never collect or share your financial data, we never show ads, and every feature will remain 100% free forever.',
+                      style: TextStyle(fontSize: 12, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: () {
+              HapticFeedback.lightImpact();
+              setState(() => _step = 1);
+            },
+            icon: const Icon(Icons.arrow_forward_rounded),
+            label: const Text('Continue to Set Up', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStep1NotificationCoach(bool isDark, Color accent, ThemeProvider prefs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(0.14),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            'STEP 1 OF 2 • STAY FINANCIALLY AWARE',
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: accent),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'Never Miss an Entry with a Friendly Evening Check-In',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, height: 1.2),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'The secret to mastering your money isn\'t complicated budgets—it\'s simply not forgetting the small expenses you made during a busy day.\n\nWhen you enable notifications, FinTrax acts like a friendly financial coach: it gives you one gentle evening check-in so you can log today\'s entries in 30 seconds before you forget, and lets you know on the 1st of every month when your Monthly Expense Summary is ready.',
+          style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+        ),
+        const SizedBox(height: 18),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.access_time_rounded, color: accent, size: 24),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Preferred Reminder Time', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Default is 9:00 PM (you can change or turn this off anytime in Settings)',
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: _pickCustomTime,
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: Text(
+                  AppConstants.formatTimeOfDay(_selectedHour, _selectedMinute),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: () => _handleEnableNotifications(prefs),
+            icon: const Icon(Icons.notifications_active_outlined),
+            label: const Text('Enable Daily Check-In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton(
+            onPressed: () => _handleSkipNotifications(prefs),
+            child: Text('Not now, I\'ll remember on my own', style: TextStyle(color: Colors.grey[500])),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStep2ReassuringSms(bool isDark, Color accent, ThemeProvider prefs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: accent.withOpacity(0.14),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            'STEP 2 OF 2 • EFFORTLESS EXPENSE TRACKING',
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: accent),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const Text(
+          'Why FinTrax Asks for SMS Permission (And How Your Privacy is Protected)',
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, height: 1.25),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'It is completely natural to feel cautious when an app asks for SMS permission—your inbox holds personal messages and OTPs. Here is exactly how FinTrax handles it so you never have to worry:',
+          style: TextStyle(fontSize: 13.5, height: 1.48, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+        ),
+        const SizedBox(height: 16),
+        _featureTile(
+          isDark: isDark,
+          icon: Icons.shield_outlined,
+          accent: AppConstants.incomeGreen,
+          title: '100% On-Device & Offline Processing',
+          subtitle: 'FinTrax has no backend servers. Your SMS messages are scanned locally inside your phone and never leave your device.',
+        ),
+        _featureTile(
+          isDark: isDark,
+          icon: Icons.lock_outline_rounded,
+          accent: accent,
+          title: 'OTPs & Personal Chats are Completely Ignored',
+          subtitle: 'The detector strictly looks for bank & UPI debit/credit alerts (amount, merchant, and date) and skips all OTPs and personal texts.',
+        ),
+        _featureTile(
+          isDark: isDark,
+          icon: Icons.check_circle_outline_rounded,
+          accent: accent,
+          title: 'Saves You From Typing Every UPI Payment',
+          subtitle: 'Instead of typing every ₹40 UPI scan or bank transfer by hand, FinTrax prepares ready-made drafts that you can review and add in one tap.',
+        ),
+        const SizedBox(height: 20),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            onPressed: () => _handleEnableSms(prefs),
+            icon: const Icon(Icons.sms_outlined),
+            label: const Text('Allow Smart SMS Auto-Track', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Center(
+          child: TextButton(
+            onPressed: () => _handleSkipSms(prefs),
+            child: Text(
+              'Skip — I\'ll type my expenses manually',
+              style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final prefs = Provider.of<ThemeProvider>(context);
+    final scheme = Theme.of(context).colorScheme;
+    final accent = prefs.useMaterialYou ? scheme.primary : AppConstants.goldAccent;
+
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              child: _step == 0
+                  ? KeyedSubtree(key: const ValueKey('step0'), child: _buildStep0Welcome(isDark, accent))
+                  : _step == 1
+                      ? KeyedSubtree(key: const ValueKey('step1'), child: _buildStep1NotificationCoach(isDark, accent, prefs))
+                      : KeyedSubtree(key: const ValueKey('step2'), child: _buildStep2ReassuringSms(isDark, accent, prefs)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
 // BOOKS & HOME SCREEN
 // ===========================================================================
 class BooksScreen extends StatefulWidget {
@@ -285,7 +709,6 @@ class _BooksScreenState extends State<BooksScreen> {
   static const String _backupFileName = 'fintrax_cloud_backup.json';
   static const String _webServerClientId = '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com';
 
-  // Primary client (Direct Android OAuth client without serverAuthCode overhead)
   final GoogleSignIn _googleAuth = GoogleSignIn(
     scopes: <String>[_driveAppDataScope],
   );
@@ -299,6 +722,7 @@ class _BooksScreenState extends State<BooksScreen> {
   List<Map<String, dynamic>> _books = [];
   List<ParsedSmsTransaction> _pendingSms = [];
   bool _loading = true;
+  bool _showMonthlyInsightBanner = false;
   BookSort _sortOrder = BookSort.updated;
   Timer? _autoBackupTimer;
 
@@ -323,6 +747,33 @@ class _BooksScreenState extends State<BooksScreen> {
     }
     if (!mounted) return;
 
+    final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
+
+    // Ensure default reminder hour is migrated to 9:00 PM (21:00) on first setup
+    if (!handledSet.contains('__default_9pm_migrated__')) {
+      if (prefs.reminderHour == 22 && prefs.reminderMinute == 0) {
+        await prefs.setDailyReminder(enabled: prefs.dailyReminderEnabled, hour: 21, minute: 0);
+      }
+      await DatabaseHelper.instance.markSmsHandled('__default_9pm_migrated__', 'done');
+    }
+
+    // Show First-Install Welcome & Friendly Coach Setup if not completed yet
+    if (!handledSet.contains('__onboarding_completed_v1__') && mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => WelcomeOnboardingScreen(
+            nativeBridge: _nativeBridge,
+            onFinished: () {
+              Navigator.of(context).pop();
+              _loadBooks();
+            },
+          ),
+        ),
+      );
+    }
+
+    if (!mounted) return;
     await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
 
     try {
@@ -344,6 +795,9 @@ class _BooksScreenState extends State<BooksScreen> {
     _autoBackupTimer = Timer(nextRun.difference(now), _runSilentDailyBackup);
   }
 
+  /// Ensures that even if the user accidentally clears the 1st-of-the-month notification,
+  /// the next time they open the app in the new month, the Previous Month's Insights
+  /// automatically pop up on the Home screen and show a quick banner during the first 5 days.
   Future<void> _checkAndShowFirstOfMonthInsights() async {
     try {
       bool launchedFromInsightNotif = false;
@@ -352,22 +806,31 @@ class _BooksScreenState extends State<BooksScreen> {
       } catch (_) {}
 
       final now = DateTime.now();
-      final markerKey = '__monthly_insight_shown_${now.year}_${now.month}__';
+      final prevMonthDate = DateTime(now.year, now.month - 1, 1);
+      final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
+      final int txCount = (insights['txCount'] as int?) ?? 0;
+      final double lendingGiven = (insights['lendingGiven'] as num?)?.toDouble() ?? 0.0;
+      final bool hasPreviousMonthData = txCount > 0 || lendingGiven > 0;
+
+      final autoPopupKey = '__monthly_insight_shown_${now.year}_${now.month}__';
+      final bannerDismissedKey = '__monthly_banner_dismissed_${now.year}_${now.month}__';
       final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
 
+      if (hasPreviousMonthData && now.day <= 5 && !handledSet.contains(bannerDismissedKey)) {
+        if (mounted) setState(() => _showMonthlyInsightBanner = true);
+      }
+
       if (launchedFromInsightNotif) {
-        await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
+        await DatabaseHelper.instance.markSmsHandled(autoPopupKey, 'shown');
         if (mounted) _openMonthlyInsightsSheet(initialPreviousMonth: true);
         return;
       }
 
-      // Auto-show on the 1st of the month the first time the user opens the app
-      if (now.day == 1 && !handledSet.contains(markerKey)) {
-        final prevMonthDate = DateTime(now.year, now.month - 1, 1);
-        final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
-        final int txCount = (insights['txCount'] as int?) ?? 0;
-        await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
-        if (txCount > 0 && mounted) {
+      // Auto-show on the Home screen the first time the user opens the app in a new month
+      // (even if they cleared the notification or opened the app after the 1st)
+      if (hasPreviousMonthData && !handledSet.contains(autoPopupKey)) {
+        await DatabaseHelper.instance.markSmsHandled(autoPopupKey, 'shown');
+        if (mounted) {
           _openMonthlyInsightsSheet(initialPreviousMonth: true);
         }
       }
@@ -891,7 +1354,7 @@ class _BooksScreenState extends State<BooksScreen> {
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.InsertChartOutlined, size: 48, color: Colors.grey[500]),
+                                Icon(Icons.insert_chart_outlined, size: 48, color: Colors.grey[500]),
                                 const SizedBox(height: 12),
                                 Text(
                                   'No entries logged for $monthTitle',
@@ -1541,9 +2004,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
     PlatformException? lastPlatformError;
 
-    // -------------------------------------------------------------------------
-    // STAGE 1: Direct Android OAuth Client (No serverClientId overhead)
-    // -------------------------------------------------------------------------
+    // STAGE 1: Direct Android OAuth Client
     try {
       AppLogger.instance.log('Stage 1 [${sw.elapsedMilliseconds}ms]: Trying Direct Android Client...', tag: 'AUTH');
       if (switchAccount) {
@@ -1570,9 +2031,7 @@ class _BooksScreenState extends State<BooksScreen> {
       AppLogger.instance.log('Stage 1 error: $e', tag: 'WARN');
     }
 
-    // -------------------------------------------------------------------------
-    // STAGE 2: Basic Email Sign-In first -> then requestScopes([drive.appdata])
-    // -------------------------------------------------------------------------
+    // STAGE 2: Basic Email Sign-In -> requestScopes([drive.appdata])
     try {
       AppLogger.instance.log('Stage 2 [${sw.elapsedMilliseconds}ms]: Trying 2-Step Basic SignIn + requestScopes...', tag: 'AUTH');
       final stepAuth = GoogleSignIn(scopes: <String>['email']);
@@ -1581,7 +2040,7 @@ class _BooksScreenState extends State<BooksScreen> {
       if (user != null) {
         final granted = await stepAuth.requestScopes(<String>[_driveAppDataScope]);
         AppLogger.instance.log('Stage 2 requestScopes granted=$granted', tag: 'AUTH');
-        final headers = await user.authHeaders;
+        await user.authHeaders;
         AppLogger.instance.log('Stage 2 SUCCESS for ${user.email}', tag: 'AUTH');
         await prefs.setDriveAccount(user.email);
         return user;
@@ -1593,9 +2052,7 @@ class _BooksScreenState extends State<BooksScreen> {
       AppLogger.instance.log('Stage 2 error: $e', tag: 'WARN');
     }
 
-    // -------------------------------------------------------------------------
     // STAGE 3: Web serverClientId Fallback
-    // -------------------------------------------------------------------------
     try {
       AppLogger.instance.log('Stage 3 [${sw.elapsedMilliseconds}ms]: Trying Web serverClientId Fallback...', tag: 'AUTH');
       final webAuth = GoogleSignIn(
@@ -1925,6 +2382,7 @@ class _BooksScreenState extends State<BooksScreen> {
   Widget _buildBooksTab(bool isDark, bool dynamicColors) {
     final scheme = Theme.of(context).colorScheme;
     final accent = dynamicColors ? scheme.primary : AppConstants.goldAccent;
+    final prevMonthName = _monthNames[DateTime(DateTime.now().year, DateTime.now().month - 1, 1).month - 1];
 
     return Scaffold(
       appBar: AppBar(
@@ -1955,6 +2413,42 @@ class _BooksScreenState extends State<BooksScreen> {
       ),
       body: Column(
         children: [
+          if (_showMonthlyInsightBanner)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Material(
+                color: scheme.primary.withOpacity(isDark ? 0.18 : 0.12),
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => _openMonthlyInsightsSheet(initialPreviousMonth: true),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+                    child: Row(
+                      children: [
+                        Icon(Icons.insights_rounded, size: 20, color: scheme.primary),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Your $prevMonthName Expense Summary is ready! Tap to view insights.',
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () async {
+                            final now = DateTime.now();
+                            final key = '__monthly_banner_dismissed_${now.year}_${now.month}__';
+                            await DatabaseHelper.instance.markSmsHandled(key, 'dismissed');
+                            if (mounted) setState(() => _showMonthlyInsightBanner = false);
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (_pendingSms.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
@@ -2298,7 +2792,7 @@ class _BooksScreenState extends State<BooksScreen> {
               dense: true,
               secondary: Icon(Icons.sms_outlined, color: scheme.primary, size: 21),
               title: const Text('Smart SMS Auto-Track', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
-              subtitle: const Text('Auto-detect bank & UPI SMS offline', style: TextStyle(fontSize: 11.5)),
+              subtitle: const Text('Auto-detect bank & UPI SMS offline on your phone', style: TextStyle(fontSize: 11.5)),
               value: prefs.smsAutoTrack,
               onChanged: (v) async {
                 HapticFeedback.lightImpact();
@@ -2331,32 +2825,54 @@ class _BooksScreenState extends State<BooksScreen> {
                         const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
                         const SizedBox(height: 2),
                         Text(
-                          prefs.dailyReminderEnabled ? '60 rotating witty reminders + SMS recap' : 'Reminders paused',
+                          prefs.dailyReminderEnabled
+                              ? 'Tap the time button to change reminder time'
+                              : 'Reminders paused • Toggle ON to receive daily check-in',
                           style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                         ),
                       ],
                     ),
                   ),
-                  if (prefs.dailyReminderEnabled)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(8),
-                        onTap: () => _selectReminderTime(prefs),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: scheme.primary.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: scheme.primary.withOpacity(0.3)),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => _selectReminderTime(prefs),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: prefs.dailyReminderEnabled
+                              ? scheme.primary.withOpacity(0.12)
+                              : Colors.grey.withOpacity(0.10),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: prefs.dailyReminderEnabled
+                                ? scheme.primary.withOpacity(0.35)
+                                : Colors.grey.withOpacity(0.3),
                           ),
-                          child: Text(
-                            AppConstants.formatTimeOfDay(prefs.reminderHour, prefs.reminderMinute),
-                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 11.5, color: scheme.primary),
-                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.access_time_rounded,
+                              size: 13,
+                              color: prefs.dailyReminderEnabled ? scheme.primary : Colors.grey,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              AppConstants.formatTimeOfDay(prefs.reminderHour, prefs.reminderMinute),
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 11.5,
+                                color: prefs.dailyReminderEnabled ? scheme.primary : Colors.grey,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
+                  ),
                   Switch(
                     value: prefs.dailyReminderEnabled,
                     onChanged: (v) async {
