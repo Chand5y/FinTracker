@@ -7,38 +7,48 @@ import 'transaction_model.dart';
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+  static Future<Database>? _dbInitFuture;
 
   DatabaseHelper._init();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('fintrack_v4.db');
+    _dbInitFuture ??= _initDB('fintrack_v4.db');
+    _database = await _dbInitFuture!;
     return _database!;
   }
 
   Future<Database> _initDB(String filePath) async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
-    return await openDatabase(
+    final db = await openDatabase(
       path,
       version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
-      onOpen: (db) async {
-        await _ensureColumnsExist(db);
-      },
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
     );
+    await _ensureColumnsExistSafely(db);
+    return db;
   }
 
-  Future<void> _ensureColumnsExist(Database db) async {
+  Future<void> _ensureColumnsExistSafely(Database db) async {
     try {
-      await db.execute("ALTER TABLE books ADD COLUMN bookType TEXT DEFAULT 'standard'");
+      final bookCols = await db.rawQuery('PRAGMA table_info(books)');
+      final hasBookType = bookCols.any((c) => c['name']?.toString() == 'bookType');
+      if (!hasBookType) {
+        await db.execute("ALTER TABLE books ADD COLUMN bookType TEXT DEFAULT 'standard'");
+      }
     } catch (_) {}
+
     try {
-      await db.execute("ALTER TABLE transactions ADD COLUMN smsBody TEXT DEFAULT ''");
+      final txCols = await db.rawQuery('PRAGMA table_info(transactions)');
+      final hasSmsBody = txCols.any((c) => c['name']?.toString() == 'smsBody');
+      if (!hasSmsBody) {
+        await db.execute("ALTER TABLE transactions ADD COLUMN smsBody TEXT DEFAULT ''");
+      }
     } catch (_) {}
   }
 
@@ -87,7 +97,7 @@ class DatabaseHelper {
       status TEXT
     )
     ''');
-    await _ensureColumnsExist(db);
+    await _ensureColumnsExistSafely(db);
   }
 
   // --- BOOK METHODS ---
@@ -145,7 +155,6 @@ class DatabaseHelper {
     return await db.insert('transactions', transaction.toMap());
   }
 
-  /// Inserts the same transaction into multiple books simultaneously
   Future<void> insertTransactionToMultipleBooks(TransactionModel baseTx, List<int> bookIds) async {
     final db = await instance.database;
     final nowIso = DateTime.now().toIso8601String();
@@ -160,7 +169,6 @@ class DatabaseHelper {
     });
   }
 
-  /// Copies an existing transaction into one or more target books
   Future<int> copyTransactionToBooks(TransactionModel tx, List<int> targetBookIds) async {
     if (targetBookIds.isEmpty) return 0;
     final db = await instance.database;
@@ -178,7 +186,6 @@ class DatabaseHelper {
     return copied;
   }
 
-  /// Moves an existing transaction from its current book to a different book
   Future<void> moveTransactionToBook(TransactionModel tx, int targetBookId) async {
     if (tx.id == null || tx.bookId == targetBookId) return;
     final db = await instance.database;
@@ -230,8 +237,6 @@ class DatabaseHelper {
       ORDER BY t.date DESC
     ''', [startIso, endIso]);
 
-    // Deduplicate identical entries added across multiple books (same name, amount, type, and minute timestamp)
-    // so overall monthly totals aren't artificially doubled when a user logs an entry into both "October Expenses" and "Shopping Expenses"
     final seenSignatures = <String>{};
     double totalIncome = 0;
     double totalExpense = 0;
