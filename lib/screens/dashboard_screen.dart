@@ -12,7 +12,14 @@ import 'add_transaction_screen.dart';
 class DashboardScreen extends StatefulWidget {
   final int bookId;
   final String bookName;
-  const DashboardScreen({Key? key, required this.bookId, required this.bookName}) : super(key: key);
+  final String bookType;
+
+  const DashboardScreen({
+    Key? key,
+    required this.bookId,
+    required this.bookName,
+    this.bookType = 'standard',
+  }) : super(key: key);
 
   /// Generates branded FinTrax PDF bytes for any book (used for both Share & Export to Downloads)
   static Future<Uint8List> generateBookPdfBytes(int bookId, String bookName) async {
@@ -269,10 +276,12 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   List<TransactionModel> _transactions = [];
   bool _isLoading = true;
+  late String _bookType;
 
   @override
   void initState() {
     super.initState();
+    _bookType = widget.bookType;
     _refreshTransactions();
   }
 
@@ -281,8 +290,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() => _isLoading = true);
     try {
       final data = await DatabaseHelper.instance.readTransactionsForBook(widget.bookId);
+      final books = await DatabaseHelper.instance.getBooksWithBalances();
+      final match = books.where((b) => (b['id'] as int) == widget.bookId).toList();
       if (mounted) {
-        setState(() => _transactions = data);
+        setState(() {
+          _transactions = data;
+          if (match.isNotEmpty) {
+            _bookType = match.first['bookType']?.toString() ?? widget.bookType;
+          }
+        });
       }
     } catch (e) {
       debugPrint('Error loading transactions: $e');
@@ -303,37 +319,255 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await Printing.sharePdf(bytes: bytes, filename: '${widget.bookName}_FinTrax_Statement.pdf');
   }
 
+  Future<void> _openCopyOrMoveBookSelector(TransactionModel tx, {required bool isMove}) async {
+    final allBooks = await DatabaseHelper.instance.getBooksWithBalances();
+    final otherBooks = allBooks.where((b) => (b['id'] as int) != widget.bookId).toList();
+
+    if (!mounted) return;
+    if (otherBooks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other books found. Create another book first!')),
+      );
+      return;
+    }
+
+    if (isMove) {
+      final int? targetBookId = await showModalBottomSheet<int>(
+        context: context,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                  child: Text('Move Entry To Book', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    'Select the book where "${tx.name}" should be moved:',
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey[500]),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: otherBooks.length,
+                    itemBuilder: (_, i) {
+                      final b = otherBooks[i];
+                      final bool isLending = (b['bookType']?.toString() ?? 'standard') == 'lending';
+                      return ListTile(
+                        leading: Icon(
+                          isLending ? Icons.handshake_rounded : Icons.book_rounded,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        title: Text(b['name'].toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+                        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+                        onTap: () => Navigator.pop(ctx, b['id'] as int),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (targetBookId != null && mounted) {
+        HapticFeedback.mediumImpact();
+        await DatabaseHelper.instance.moveTransactionToBook(tx, targetBookId);
+        final targetName = otherBooks.firstWhere((b) => (b['id'] as int) == targetBookId)['name'].toString();
+        await _refreshTransactions();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Moved "${tx.name}" to $targetName'),
+              backgroundColor: AppConstants.incomeGreen,
+            ),
+          );
+        }
+      }
+    } else {
+      final selectedIds = <int>{};
+      final bool? confirmed = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setSheetState) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                    child: Text('Copy Entry To Book(s)', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(
+                      'Select one or more books to copy "${tx.name}" into:',
+                      style: TextStyle(fontSize: 12.5, color: Colors.grey[500]),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Divider(height: 1),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: otherBooks.length,
+                      itemBuilder: (_, i) {
+                        final b = otherBooks[i];
+                        final int bId = b['id'] as int;
+                        final bool isLending = (b['bookType']?.toString() ?? 'standard') == 'lending';
+                        final bool isChecked = selectedIds.contains(bId);
+                        return CheckboxListTile(
+                          secondary: Icon(
+                            isLending ? Icons.handshake_rounded : Icons.book_rounded,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          title: Text(b['name'].toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+                          value: isChecked,
+                          onChanged: (v) {
+                            HapticFeedback.selectionClick();
+                            setSheetState(() {
+                              if (v == true) {
+                                selectedIds.add(bId);
+                              } else {
+                                selectedIds.remove(bId);
+                              }
+                            });
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: selectedIds.isEmpty ? null : () => Navigator.pop(ctx, true),
+                        child: Text(
+                          selectedIds.isEmpty
+                              ? 'Select Book(s)'
+                              : 'Copy to ${selectedIds.length} Book${selectedIds.length == 1 ? '' : 's'}',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      if (confirmed == true && selectedIds.isNotEmpty && mounted) {
+        HapticFeedback.mediumImpact();
+        final count = await DatabaseHelper.instance.copyTransactionToBooks(tx, selectedIds.toList());
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Copied "${tx.name}" to $count book${count == 1 ? '' : 's'}!'),
+              backgroundColor: AppConstants.incomeGreen,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   void _showTransactionOptions(TransactionModel tx) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Edit Entry'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: tx.type, existingTransaction: tx)),
-                ).then((_) => _refreshTransactions());
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline, color: AppConstants.expenseRed),
-              title: const Text('Delete Entry', style: TextStyle(color: AppConstants.expenseRed)),
-              onTap: () async {
-                HapticFeedback.heavyImpact();
-                await DatabaseHelper.instance.deleteTransaction(tx.id!, widget.bookId);
-                if (sheetContext.mounted) Navigator.pop(sheetContext);
-                _refreshTransactions();
-              },
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                child: Text(
+                  tx.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit Entry'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddTransactionScreen(bookId: widget.bookId, type: tx.type, existingTransaction: tx),
+                    ),
+                  ).then((_) => _refreshTransactions());
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy_rounded),
+                title: const Text('Copy to Book...'),
+                subtitle: const Text('Duplicate this entry into another book', style: TextStyle(fontSize: 11.5)),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _openCopyOrMoveBookSelector(tx, isMove: false);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.drive_file_move_outlined),
+                title: const Text('Move to Book...'),
+                subtitle: const Text('Transfer this entry out of this book to another book', style: TextStyle(fontSize: 11.5)),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _openCopyOrMoveBookSelector(tx, isMove: true);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: AppConstants.expenseRed),
+                title: const Text('Delete Entry', style: TextStyle(color: AppConstants.expenseRed)),
+                onTap: () async {
+                  HapticFeedback.heavyImpact();
+                  await DatabaseHelper.instance.deleteTransaction(tx.id!, widget.bookId);
+                  if (sheetContext.mounted) Navigator.pop(sheetContext);
+                  _refreshTransactions();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -342,6 +576,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bool isLending = _bookType == 'lending';
     final totalIncome = _calculateTotal('Income');
     final totalExpenses = _calculateTotal('Expense');
     final totalBalance = totalIncome - totalExpenses;
@@ -349,7 +584,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.bookName),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.bookName),
+            if (isLending)
+              const Text(
+                'LENDING / UDHAAR LEDGER',
+                style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: AppConstants.goldAccent, letterSpacing: 1.0),
+              ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Share PDF Statement',
@@ -366,14 +611,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
             decoration: BoxDecoration(
               color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+              border: Border.all(
+                color: isLending
+                    ? AppConstants.goldAccent.withOpacity(0.45)
+                    : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+              ),
             ),
             child: Column(
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Net Balance', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[700], fontSize: 15, fontWeight: FontWeight.w500)),
+                    Text(
+                      isLending ? 'Net Pending / Balance' : 'Net Balance',
+                      style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[700], fontSize: 15, fontWeight: FontWeight.w500),
+                    ),
                     Text(
                       '${isNegative ? '-' : ''}${AppConstants.defaultCurrency}${totalBalance.abs().toStringAsFixed(0)}',
                       style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 24),
@@ -387,16 +639,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total In (+)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 13)),
-                    Text('${AppConstants.defaultCurrency}${totalIncome.toStringAsFixed(0)}', style: const TextStyle(color: AppConstants.incomeGreen, fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(
+                      isLending ? 'Total Returned / Received (+)' : 'Total In (+)',
+                      style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 13),
+                    ),
+                    Text(
+                      '${AppConstants.defaultCurrency}${totalIncome.toStringAsFixed(0)}',
+                      style: const TextStyle(color: AppConstants.incomeGreen, fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 6),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total Out (-)', style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 13)),
-                    Text('${AppConstants.defaultCurrency}${totalExpenses.toStringAsFixed(0)}', style: const TextStyle(color: AppConstants.expenseRed, fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(
+                      isLending ? 'Total Given / Lent (-)' : 'Total Out (-)',
+                      style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[600], fontSize: 13),
+                    ),
+                    Text(
+                      '${AppConstants.defaultCurrency}${totalExpenses.toStringAsFixed(0)}',
+                      style: const TextStyle(color: AppConstants.expenseRed, fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
                   ],
                 ),
               ],
@@ -405,8 +669,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Showing ${_transactions.length} ${_transactions.length == 1 ? 'entry' : 'entries'}',
-              style: TextStyle(color: Colors.grey[500], fontSize: 12, fontWeight: FontWeight.w500),
+              'Showing ${_transactions.length} ${_transactions.length == 1 ? 'entry' : 'entries'} • Long-press for Copy / Move',
+              style: TextStyle(color: Colors.grey[500], fontSize: 11.5, fontWeight: FontWeight.w500),
             ),
           ),
           Expanded(
@@ -418,6 +682,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     itemBuilder: (context, index) {
                       final tx = _transactions[index];
                       final bool hasImage = tx.imagePath.isNotEmpty;
+                      final bool hasSms = tx.effectiveSmsText.isNotEmpty;
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
@@ -482,6 +747,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       const SizedBox(width: 8),
                                       Text(AppConstants.formatOrdinalDateTime(tx.date), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                                       const Spacer(),
+                                      if (hasSms)
+                                        Padding(
+                                          padding: const EdgeInsets.only(right: 6),
+                                          child: Icon(Icons.sms_outlined, size: 15, color: Theme.of(context).colorScheme.primary.withOpacity(0.8)),
+                                        ),
                                       if (hasImage) Icon(Icons.attachment_rounded, size: 16, color: Colors.grey[500]),
                                     ],
                                   ),
@@ -520,7 +790,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ).then((_) => _refreshTransactions());
                       },
                       icon: const Icon(Icons.add_rounded),
-                      label: const Text('Cash In', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      label: Text(
+                        isLending ? 'Received (+)' : 'Cash In',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -540,7 +813,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ).then((_) => _refreshTransactions());
                       },
                       icon: const Icon(Icons.remove_rounded),
-                      label: const Text('Cash Out', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                      label: Text(
+                        isLending ? 'Lent / Given (-)' : 'Cash Out',
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                      ),
                     ),
                   ),
                 ],
