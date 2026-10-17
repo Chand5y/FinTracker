@@ -21,13 +21,25 @@ class DatabaseHelper {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
+      onOpen: (db) async {
+        await _ensureColumnsExist(db);
+      },
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
     );
+  }
+
+  Future<void> _ensureColumnsExist(Database db) async {
+    try {
+      await db.execute("ALTER TABLE books ADD COLUMN bookType TEXT DEFAULT 'standard'");
+    } catch (_) {}
+    try {
+      await db.execute("ALTER TABLE transactions ADD COLUMN smsBody TEXT DEFAULT ''");
+    } catch (_) {}
   }
 
   Future _createDB(Database db, int version) async {
@@ -37,7 +49,8 @@ class DatabaseHelper {
       name TEXT UNIQUE NOT NULL,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
-      isPinned INTEGER DEFAULT 0
+      isPinned INTEGER DEFAULT 0,
+      bookType TEXT DEFAULT 'standard'
     )
     ''');
 
@@ -50,6 +63,7 @@ class DatabaseHelper {
       name TEXT,
       category TEXT,
       notes TEXT,
+      smsBody TEXT DEFAULT '',
       imagePath TEXT,
       date TEXT,
       currency TEXT,
@@ -73,6 +87,7 @@ class DatabaseHelper {
       status TEXT
     )
     ''');
+    await _ensureColumnsExist(db);
   }
 
   // --- BOOK METHODS ---
@@ -89,6 +104,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final rawResult = await db.rawQuery('''
       SELECT b.id, b.name, b.createdAt, b.updatedAt, b.isPinned,
+             COALESCE(b.bookType, 'standard') as bookType,
              COALESCE(SUM(CASE WHEN t.type = 'Income' THEN t.amount ELSE 0 END), 0) as totalIn,
              COALESCE(SUM(CASE WHEN t.type = 'Expense' THEN t.amount ELSE 0 END), 0) as totalOut
       FROM books b
@@ -103,10 +119,15 @@ class DatabaseHelper {
     return await db.update('books', {'isPinned': isPinned ? 1 : 0}, where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<int> updateBookName(int id, String newName) async {
+  Future<int> updateBookName(int id, String newName, {String? bookType}) async {
     final db = await instance.database;
     try {
-      return await db.update('books', {'name': newName, 'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [id]);
+      final map = <String, dynamic>{
+        'name': newName,
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+      if (bookType != null) map['bookType'] = bookType;
+      return await db.update('books', map, where: 'id = ?', whereArgs: [id]);
     } catch (e) {
       return -1;
     }
@@ -123,7 +144,58 @@ class DatabaseHelper {
     await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
     return await db.insert('transactions', transaction.toMap());
   }
-  
+
+  /// Inserts the same transaction into multiple books simultaneously
+  Future<void> insertTransactionToMultipleBooks(TransactionModel baseTx, List<int> bookIds) async {
+    final db = await instance.database;
+    final nowIso = DateTime.now().toIso8601String();
+    final uniqueBookIds = bookIds.toSet().toList();
+
+    await db.transaction((txn) async {
+      for (final targetBookId in uniqueBookIds) {
+        final copy = baseTx.copyWith(clearId: true, bookId: targetBookId);
+        await txn.insert('transactions', copy.toMap());
+        await txn.update('books', {'updatedAt': nowIso}, where: 'id = ?', whereArgs: [targetBookId]);
+      }
+    });
+  }
+
+  /// Copies an existing transaction into one or more target books
+  Future<int> copyTransactionToBooks(TransactionModel tx, List<int> targetBookIds) async {
+    if (targetBookIds.isEmpty) return 0;
+    final db = await instance.database;
+    final nowIso = DateTime.now().toIso8601String();
+    int copied = 0;
+
+    await db.transaction((txn) async {
+      for (final targetId in targetBookIds.toSet()) {
+        final newTx = tx.copyWith(clearId: true, bookId: targetId);
+        await txn.insert('transactions', newTx.toMap());
+        await txn.update('books', {'updatedAt': nowIso}, where: 'id = ?', whereArgs: [targetId]);
+        copied++;
+      }
+    });
+    return copied;
+  }
+
+  /// Moves an existing transaction from its current book to a different book
+  Future<void> moveTransactionToBook(TransactionModel tx, int targetBookId) async {
+    if (tx.id == null || tx.bookId == targetBookId) return;
+    final db = await instance.database;
+    final nowIso = DateTime.now().toIso8601String();
+
+    await db.transaction((txn) async {
+      await txn.update(
+        'transactions',
+        {'bookId': targetBookId},
+        where: 'id = ?',
+        whereArgs: [tx.id],
+      );
+      await txn.update('books', {'updatedAt': nowIso}, where: 'id = ?', whereArgs: [tx.bookId]);
+      await txn.update('books', {'updatedAt': nowIso}, where: 'id = ?', whereArgs: [targetBookId]);
+    });
+  }
+
   Future<int> updateTransaction(TransactionModel transaction) async {
     final db = await instance.database;
     await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [transaction.bookId]);
@@ -140,6 +212,119 @@ class DatabaseHelper {
     final db = await instance.database;
     await db.update('books', {'updatedAt': DateTime.now().toIso8601String()}, where: 'id = ?', whereArgs: [bookId]);
     return await db.delete('transactions', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- MONTHLY FINANCIAL INSIGHTS ENGINE ---
+  Future<Map<String, dynamic>> getMonthlyInsights(int year, int month) async {
+    final db = await instance.database;
+    final start = DateTime(year, month, 1);
+    final end = DateTime(year, month + 1, 1);
+    final startIso = start.toIso8601String();
+    final endIso = end.toIso8601String();
+
+    final rows = await db.rawQuery('''
+      SELECT t.*, b.name as bookName, COALESCE(b.bookType, 'standard') as bookType
+      FROM transactions t
+      INNER JOIN books b ON t.bookId = b.id
+      WHERE t.date >= ? AND t.date < ?
+      ORDER BY t.date DESC
+    ''', [startIso, endIso]);
+
+    // Deduplicate identical entries added across multiple books (same name, amount, type, and minute timestamp)
+    // so overall monthly totals aren't artificially doubled when a user logs an entry into both "October Expenses" and "Shopping Expenses"
+    final seenSignatures = <String>{};
+    double totalIncome = 0;
+    double totalExpense = 0;
+    double shoppingSpend = 0;
+    double grocerySpend = 0;
+    double foodSpend = 0;
+    double lendingGiven = 0;
+    double lendingRecovered = 0;
+    int totalUniqueTxCount = 0;
+
+    final Map<String, double> categoryTotals = {};
+    final Map<String, double> bookExpenseTotals = {};
+    String topExpenseTitle = '';
+    double topExpenseAmount = 0;
+
+    for (final r in rows) {
+      final String bookType = r['bookType']?.toString() ?? 'standard';
+      final String bookName = r['bookName']?.toString() ?? 'Book';
+      final String type = r['type']?.toString() ?? 'Expense';
+      final double amount = (r['amount'] as num?)?.toDouble() ?? 0.0;
+      final String name = (r['name']?.toString() ?? '').trim();
+      final String category = (r['category']?.toString() ?? '').trim();
+      final String dateStr = r['date']?.toString() ?? '';
+      final String minuteKey = dateStr.length >= 16 ? dateStr.substring(0, 16) : dateStr;
+
+      if (bookType == 'lending') {
+        if (type == 'Expense') {
+          lendingGiven += amount;
+        } else {
+          lendingRecovered += amount;
+        }
+        continue;
+      }
+
+      if (type == 'Expense') {
+        bookExpenseTotals[bookName] = (bookExpenseTotals[bookName] ?? 0.0) + amount;
+      }
+
+      final sig = '$type|${amount.toStringAsFixed(2)}|${name.toLowerCase()}|$minuteKey';
+      if (seenSignatures.contains(sig)) continue;
+      seenSignatures.add(sig);
+      totalUniqueTxCount++;
+
+      if (type == 'Income') {
+        totalIncome += amount;
+      } else {
+        totalExpense += amount;
+        if (amount > topExpenseAmount) {
+          topExpenseAmount = amount;
+          topExpenseTitle = name.isEmpty ? 'Expense' : name;
+        }
+
+        final String catLabel = category.isEmpty ? 'Uncategorized' : category;
+        categoryTotals[catLabel] = (categoryTotals[catLabel] ?? 0.0) + amount;
+
+        final lowerCat = category.toLowerCase();
+        final lowerName = name.toLowerCase();
+        final lowerBook = bookName.toLowerCase();
+
+        if (lowerCat.contains('shop') || lowerBook.contains('shop') || lowerName.contains('amazon') || lowerName.contains('flipkart') || lowerName.contains('myntra')) {
+          shoppingSpend += amount;
+        }
+        if (lowerCat.contains('grocer') || lowerBook.contains('grocer') || lowerName.contains('blinkit') || lowerName.contains('zepto') || lowerName.contains('instamart') || lowerName.contains('bigbasket') || lowerName.contains('milk') || lowerName.contains('vegetable')) {
+          grocerySpend += amount;
+        }
+        if (lowerCat.contains('food') || lowerCat.contains('dining') || lowerName.contains('zomato') || lowerName.contains('swiggy')) {
+          foodSpend += amount;
+        }
+      }
+    }
+
+    final sortedCategories = categoryTotals.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final sortedBooks = bookExpenseTotals.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return {
+      'year': year,
+      'month': month,
+      'totalIncome': totalIncome,
+      'totalExpense': totalExpense,
+      'netFlow': totalIncome - totalExpense,
+      'shoppingSpend': shoppingSpend,
+      'grocerySpend': grocerySpend,
+      'foodSpend': foodSpend,
+      'lendingGiven': lendingGiven,
+      'lendingRecovered': lendingRecovered,
+      'txCount': totalUniqueTxCount,
+      'topExpenseTitle': topExpenseTitle,
+      'topExpenseAmount': topExpenseAmount,
+      'categoryBreakdown': sortedCategories.map((e) => {'name': e.key, 'amount': e.value}).toList(),
+      'bookBreakdown': sortedBooks.map((e) => {'name': e.key, 'amount': e.value}).toList(),
+    };
   }
 
   // --- SMS TRACKING METHODS ---
@@ -177,7 +362,7 @@ class DatabaseHelper {
 
     final payload = {
       'app': 'FinTrax',
-      'version': 1,
+      'version': 2,
       'exportedAt': DateTime.now().toIso8601String(),
       'books': books,
       'transactions': transactions,
@@ -204,6 +389,7 @@ class DatabaseHelper {
           final String createdAt = item['createdAt']?.toString() ?? DateTime.now().toIso8601String();
           final String updatedAt = item['updatedAt']?.toString() ?? createdAt;
           final int isPinned = (item['isPinned'] as num?)?.toInt() ?? 0;
+          final String bookType = item['bookType']?.toString() ?? 'standard';
 
           final existing = await txn.query('books', where: 'name = ?', whereArgs: [name]);
           if (existing.isNotEmpty) {
@@ -215,6 +401,7 @@ class DatabaseHelper {
               'createdAt': createdAt,
               'updatedAt': updatedAt,
               'isPinned': isPinned,
+              'bookType': bookType,
             });
             oldBookIdToNewId[oldId] = newId;
             restoredBooksCount++;
@@ -237,13 +424,16 @@ class DatabaseHelper {
               whereArgs: [targetBookId, dateStr, amount, name],
             );
             if (dup.isEmpty) {
+              final String notesStr = item['notes']?.toString() ?? '';
+              final String smsBodyStr = item['smsBody']?.toString() ?? notesStr;
               await txn.insert('transactions', {
                 'bookId': targetBookId,
                 'type': item['type']?.toString() ?? 'Expense',
                 'amount': amount,
                 'name': name,
                 'category': item['category']?.toString() ?? '',
-                'notes': item['notes']?.toString() ?? '',
+                'notes': notesStr,
+                'smsBody': smsBodyStr,
                 'imagePath': item['imagePath']?.toString() ?? '',
                 'date': dateStr,
                 'currency': item['currency']?.toString() ?? '₹',
