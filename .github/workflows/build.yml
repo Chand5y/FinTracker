@@ -39,6 +39,8 @@ jobs:
             git commit -m "Lock permanent Android signing key" || true
             git push || true
           fi
+          mkdir -p ~/.android
+          cp fintrax.jks ~/.android/debug.keystore
           
       - name: Generate Android configuration files
         run: flutter create --project-name fintrax --org com.chandsy .
@@ -70,24 +72,135 @@ jobs:
           import java.util.Calendar
 
           class ReminderReceiver : BroadcastReceiver() {
+
+              private val dailyMessages = arrayOf(
+                  "Your wallet had an eventful day. Take 30 seconds to log where the money went!",
+                  "Quick check-in: Did you spend money today, or did money just mysteriously evaporate?",
+                  "UPI makes spending take 2 seconds. Logging it in FinTrax only takes 5!",
+                  "That 'small' coffee and snack add up faster than you think. Log today's expenses!",
+                  "Before you scroll yourself to sleep, give your expense book 30 seconds of love.",
+                  "Future You called. They want to know what you spent ₹250 on today.",
+                  "Your bank balance knows what you did today. Might as well tell FinTrax too!",
+                  "Even ₹20 chai counts when it's a daily ritual. Log your day's entries!",
+                  "Don't let today's expenses become next month's 'Wait, where did my salary go?' mystery.",
+                  "Memory fades by tomorrow morning, but numbers in FinTrax stay forever. Log today's spend!",
+                  "Zero judgement if you ordered food again today—just log it so you stay in control!",
+                  "Did your money go to groceries, shopping, or 'miscellaneous vibes' today? Jot it down!",
+                  "A 10-second log tonight saves a 2-hour head-scratching session at the end of the month.",
+                  "If you scanned a QR code today, this notification is officially looking at you.",
+                  "Your money works hard for you. The least we can do is keep track of where it travels!",
+                  "Spent nothing today? Amazing, enjoy the victory! Spent a little? Let's log it.",
+                  "Treat your wallet like a business—close the register before you go to bed.",
+                  "Mystery expenses are only fun in movies. Log today's transactions while they're fresh!",
+                  "One quick tap in FinTrax tonight = total peace of mind on the 1st of next month.",
+                  "Did someone borrow money from you today? Log it in your Lending book before you both forget!",
+                  "I'm sure that purchase today was '100% necessary.' Let's put it in the book anyway!",
+                  "Ignoring an expense doesn't make it free. Trust me, I did the math.",
+                  "Your bank SMS inbox is working overtime. Come review and add today's transactions!",
+                  "Retail therapy is great, until the monthly summary arrives. Log today's shopping!",
+                  "Pretending you didn't spend money today is a bold strategy. Logging it is a smarter one.",
+                  "Was it a 'need' or a 'want'? FinTrax won't judge, it just wants the numbers.",
+                  "You remembered to charge your phone. Now take 20 seconds to update your expense book!",
+                  "Unless you lived on air and sunshine today, there's probably an expense waiting to be logged.",
+                  "That 'Add to Cart' finger was quick today. Let's see that same speed in FinTrax!",
+                  "Spoiler alert: 'I'll remember this expense tomorrow' is the biggest lie we tell ourselves.",
+                  "Your wallet isn't leaking; it's just waiting for you to track the tiny drips.",
+                  "Another day, another QR code scanned at lightning speed. Time for the 10 PM recap!",
+                  "No matter how fast you close the payment app, the money still left. Let's log it!",
+                  "Your future billionaire self is waiting for you to build the habit of tracking ₹50 expenses.",
+                  "Online sales are temporary; financial clarity is permanent. Log what you bought today!",
+                  "Cash spent still counts as real money—don't let cash expenses sneak past your book!",
+                  "Let's play a quick game called 'Name 3 things you spent money on today.' Go!",
+                  "If your money had a GPS, where did it travel today? Drop a pin in FinTrax.",
+                  "Your budget isn't mad, it just wants to be kept in the loop. Log today's entries!",
+                  "Skipping expense tracking is like driving with your eyes closed. Take a quick peek tonight!",
+                  "Financial freedom starts with knowing your numbers. Take a moment to log today's expenses.",
+                  "Small daily habits build big financial confidence. Ready to log today's transactions?",
+                  "You don't need to earn more to feel in control—just knowing where your money goes changes everything.",
+                  "Every entry you log is a step toward smarter money decisions. Keep the streak going!",
+                  "Great money managers aren't born; they just check in with their expenses for 1 minute a night.",
+                  "Awareness is the best financial advisor. Open FinTrax and wrap up your day's numbers!",
+                  "Whether today was a high-spend day or a zero-spend day, tracking it keeps you in the driver's seat.",
+                  "Knowing your daily numbers turns financial stress into financial strategy. Let's log today!",
+                  "A clear mind and a balanced book make for the best night's sleep. Log your day!",
+                  "You're building a clearer picture of your finances one day at a time. Add today's entries!",
+                  "Smart spending starts with honest tracking. Take 30 seconds to update your books tonight.",
+                  "Look after your rupees in FinTrax tonight, and they'll look after you tomorrow.",
+                  "Consistency beats perfection. Even logging one or two expenses tonight keeps you ahead!",
+                  "Your monthly insights are built one evening at a time. Add today's piece of the puzzle!",
+                  "Tracking expenses isn't about restricting yourself—it's about spending on what truly matters.",
+                  "Take pride in staying on top of your finances. Let's log today's transactions!",
+                  "10:00 PM financial check-in: 60 seconds now for 100% clarity on your money.",
+                  "Most people have no idea where 30% of their income goes. You're not 'most people'—log today's spend!",
+                  "End the day with clarity. Review your bank SMS or add today's cash expenses in FinTrax.",
+                  "You've got big goals ahead. Keeping track of today's expenses helps you reach them faster!"
+              )
+
+              private val monthNames = arrayOf(
+                  "January", "February", "March", "April", "May", "June",
+                  "July", "August", "September", "October", "November", "December"
+              )
+
               override fun onReceive(context: Context, intent: Intent?) {
+                  val kind = intent?.getStringExtra("kind") ?: "daily"
                   val channelId = "fintrax_daily_reminder"
                   val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                      val channel = NotificationChannel(channelId, "Daily Expense Reminders", NotificationManager.IMPORTANCE_HIGH)
+                      val channel = NotificationChannel(channelId, "FinTrax Reminders & Insights", NotificationManager.IMPORTANCE_HIGH)
                       nm.createNotificationChannel(channel)
                   }
 
+                  if (kind == "monthly_insight") {
+                      val cal = Calendar.getInstance()
+                      cal.add(Calendar.MONTH, -1)
+                      val prevMonthName = monthNames[cal.get(Calendar.MONTH)]
+                      val title = "FinTrax • Your $prevMonthName Expense Summary is Ready 📊"
+                      val bodyText = "See how much you spent on shopping, groceries, and your net flow in $prevMonthName. Tap to view your insights!"
+
+                      val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                          flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                          putExtra("open_monthly_insights", true)
+                      }
+                      val piFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      } else {
+                          PendingIntent.FLAG_UPDATE_CURRENT
+                      }
+                      val contentPi = PendingIntent.getActivity(context, 2002, launchIntent, piFlags)
+
+                      val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          android.app.Notification.Builder(context, channelId)
+                      } else {
+                          @Suppress("DEPRECATION")
+                          android.app.Notification.Builder(context)
+                      }
+
+                      builder.setSmallIcon(android.R.drawable.ic_dialog_info)
+                          .setContentTitle(title)
+                          .setContentText(bodyText)
+                          .setStyle(android.app.Notification.BigTextStyle().bigText(bodyText))
+                          .setAutoCancel(true)
+                          .setContentIntent(contentPi)
+
+                      nm.notify(3002, builder.build())
+                      scheduleMonthlyInsight(context)
+                      return
+                  }
+
                   val todaySmsCount = countTodayBankSms(context)
+                  val cal = Calendar.getInstance()
+                  val msgIndex = (cal.get(Calendar.DAY_OF_YEAR) + cal.get(Calendar.YEAR)) % dailyMessages.size
+                  val wittyLine = dailyMessages[msgIndex]
+
                   val title = if (todaySmsCount > 0) {
                       "FinTrax • $todaySmsCount Bank Transaction${if (todaySmsCount > 1) "s" else ""} Found"
                   } else {
-                      "FinTrax • Daily Expense Reminder"
+                      "FinTrax • Daily Expense Check-In"
                   }
                   val bodyText = if (todaySmsCount > 0) {
-                      "We found $todaySmsCount bank/UPI transaction${if (todaySmsCount > 1) "s" else ""} today. Tap to log them into your book!"
+                      "$wittyLine (We also spotted $todaySmsCount bank SMS today—tap to review & add!)"
                   } else {
-                      "Made any expenses or income today? Tap to log today's entries in your book."
+                      wittyLine
                   }
 
                   val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
@@ -110,6 +223,7 @@ jobs:
                   builder.setSmallIcon(android.R.drawable.ic_dialog_info)
                       .setContentTitle(title)
                       .setContentText(bodyText)
+                      .setStyle(android.app.Notification.BigTextStyle().bigText(bodyText))
                       .setAutoCancel(true)
                       .setContentIntent(contentPi)
 
@@ -163,6 +277,7 @@ jobs:
                   fun scheduleNext(context: Context, hour: Int, minute: Int) {
                       val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                       val intent = Intent(context, ReminderReceiver::class.java).apply {
+                          putExtra("kind", "daily")
                           putExtra("hour", hour)
                           putExtra("minute", minute)
                       }
@@ -179,6 +294,36 @@ jobs:
                           set(Calendar.MILLISECOND, 0)
                           if (timeInMillis <= System.currentTimeMillis()) {
                               add(Calendar.DAY_OF_YEAR, 1)
+                          }
+                      }
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                      } else {
+                          am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                      }
+                      scheduleMonthlyInsight(context)
+                  }
+
+                  fun scheduleMonthlyInsight(context: Context) {
+                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                      val intent = Intent(context, ReminderReceiver::class.java).apply {
+                          putExtra("kind", "monthly_insight")
+                      }
+                      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                      } else {
+                          PendingIntent.FLAG_UPDATE_CURRENT
+                      }
+                      val pi = PendingIntent.getBroadcast(context, 4002, intent, flags)
+                      val cal = Calendar.getInstance().apply {
+                          set(Calendar.DAY_OF_MONTH, 1)
+                          set(Calendar.HOUR_OF_DAY, 9)
+                          set(Calendar.MINUTE, 0)
+                          set(Calendar.SECOND, 0)
+                          set(Calendar.MILLISECOND, 0)
+                          if (timeInMillis <= System.currentTimeMillis()) {
+                              add(Calendar.MONTH, 1)
+                              set(Calendar.DAY_OF_MONTH, 1)
                           }
                       }
                       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -222,11 +367,31 @@ jobs:
               private val CHANNEL = "com.chandankumar.fintrack/sms"
               private var pendingResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
+              private var pendingInsightOpen: Boolean = false
+
+              override fun onCreate(savedInstanceState: android.os.Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  if (intent?.getBooleanExtra("open_monthly_insights", false) == true) {
+                      pendingInsightOpen = true
+                  }
+              }
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  if (intent.getBooleanExtra("open_monthly_insights", false)) {
+                      pendingInsightOpen = true
+                  }
+              }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
                       when (call.method) {
+                          "consumeMonthlyInsightIntent" -> {
+                              val flag = pendingInsightOpen
+                              pendingInsightOpen = false
+                              result.success(flag)
+                          }
                           "requestSmsPermission" -> {
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                                   if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
@@ -308,9 +473,10 @@ jobs:
                               }
                               pendingPdfBytes = bytes
                               pendingResult = result
+                              val mimeType = if (fileName.endsWith(".txt", ignoreCase = true)) "text/plain" else "application/pdf"
                               val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                                   addCategory(Intent.CATEGORY_OPENABLE)
-                                  type = "application/pdf"
+                                  type = mimeType
                                   putExtra(Intent.EXTRA_TITLE, fileName)
                               }
                               startActivityForResult(intent, 1006)
