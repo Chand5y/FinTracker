@@ -64,19 +64,7 @@ class AppLogger {
   Future<void> logRuntimeEnvironment(GoogleSignIn googleAuth, ThemeProvider prefs) async {
     log('--- Inspecting Runtime Environment ---', tag: 'ENV');
     log('OS: ${Platform.operatingSystem} | Version: ${Platform.operatingSystemVersion}', tag: 'ENV');
-    try {
-      final cmdlineFile = File('/proc/self/cmdline');
-      if (await cmdlineFile.exists()) {
-        final rawCmd = await cmdlineFile.readAsString();
-        final pkgName = rawCmd.split('\x00').first.trim();
-        log('Running Android Process / Package Name: "$pkgName"', tag: 'ENV');
-      }
-    } catch (e) {
-      log('Could not read /proc/self/cmdline: $e', tag: 'ENV');
-    }
-
     log('GoogleSignIn Configured Scopes: ${googleAuth.scopes.join(", ")}', tag: 'OAUTH_CFG');
-    log('GoogleSignIn serverClientId: ${googleAuth.serverClientId ?? "null (direct Android client)"}', tag: 'OAUTH_CFG');
     log('Saved Drive Account in Prefs: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
     log('--- Runtime Environment Check Complete ---', tag: 'ENV');
   }
@@ -85,8 +73,7 @@ class AppLogger {
     final combined = '$code $rawMessage';
     if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
       return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the OAuth handshake. '
-          'Note: Changes in Google Cloud Console (such as removing the App Logo or updating OAuth clients) '
-          'can take 5 to 30 minutes to propagate across Google servers.';
+          'Note: Changes in Google Cloud Console can take 5 to 30 minutes to propagate across Google servers.';
     }
     if (combined.contains('12500:')) {
       return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete.';
@@ -107,12 +94,9 @@ class AppLogger {
       if (await downloadDir.exists()) {
         final outFile = File('${downloadDir.path}/$fileName');
         await outFile.writeAsBytes(bytes, flush: true);
-        log('Saved log directly to ${outFile.path}', tag: 'EXPORT');
         return outFile.path;
       }
-    } catch (e) {
-      log('Direct /Download write blocked ($e). Falling back to system file saver...', tag: 'EXPORT');
-    }
+    } catch (_) {}
 
     try {
       final saved = await _nativeChannel.invokeMethod<bool>('savePdfToDownloads', {
@@ -120,13 +104,8 @@ class AppLogger {
             'fileName': fileName,
           }) ??
           false;
-      if (saved) {
-        log('Saved log via system Downloads dialog as $fileName', tag: 'EXPORT');
-        return 'Downloads/$fileName';
-      }
-    } catch (e) {
-      log('Native document save failed: $e', tag: 'EXPORT');
-    }
+      if (saved) return 'Downloads/$fileName';
+    } catch (_) {}
     return null;
   }
 }
@@ -153,10 +132,7 @@ class DebugLogsScreen extends StatelessWidget {
               await Clipboard.setData(ClipboardData(text: text));
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('All diagnostic logs copied to clipboard!'),
-                    backgroundColor: AppConstants.incomeGreen,
-                  ),
+                  const SnackBar(content: Text('Logs copied to clipboard!'), backgroundColor: AppConstants.incomeGreen),
                 );
               }
             },
@@ -167,9 +143,6 @@ class DebugLogsScreen extends StatelessWidget {
             onPressed: () {
               HapticFeedback.mediumImpact();
               AppLogger.instance.clear();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Logs cleared.')),
-              );
             },
           ),
           IconButton(
@@ -181,11 +154,7 @@ class DebugLogsScreen extends StatelessWidget {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(
-                      savedPath != null
-                          ? 'Log saved to: $savedPath'
-                          : 'Save cancelled or failed. Use the Copy button to copy logs.',
-                    ),
+                    content: Text(savedPath != null ? 'Saved to: $savedPath' : 'Save failed. Use Copy instead.'),
                     backgroundColor: savedPath != null ? AppConstants.incomeGreen : AppConstants.expenseRed,
                   ),
                 );
@@ -194,498 +163,368 @@ class DebugLogsScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            color: isDark ? const Color(0xFF161922) : const Color(0xFFF3EFE6),
-            child: Row(
-              children: [
-                const Icon(Icons.info_outline_rounded, size: 16, color: Colors.grey),
-                const SizedBox(width: 8),
-                const Expanded(
+      body: ValueListenableBuilder<int>(
+        valueListenable: AppLogger.instance.logNotifier,
+        builder: (context, _, __) {
+          final logs = AppLogger.instance.logs;
+          if (logs.isEmpty) {
+            return const Center(child: Text('No logs recorded yet.', style: TextStyle(color: Colors.grey)));
+          }
+          return SelectionArea(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(12),
+              itemCount: logs.length,
+              itemBuilder: (context, index) {
+                final line = logs[index];
+                final isErr = line.contains('[ERROR]') || line.contains('[DIAGNOSIS]') || line.contains('failed');
+                final isWarn = line.contains('[WARN]');
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Text(
-                    'Tap Download to save as .txt in Downloads, or Copy to paste.',
-                    style: TextStyle(fontSize: 11.5, color: Colors.grey),
-                  ),
-                ),
-                ValueListenableBuilder<int>(
-                  valueListenable: AppLogger.instance.logNotifier,
-                  builder: (_, count, __) => Text(
-                    '$count lines',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ValueListenableBuilder<int>(
-              valueListenable: AppLogger.instance.logNotifier,
-              builder: (context, _, __) {
-                final logs = AppLogger.instance.logs;
-                if (logs.isEmpty) {
-                  return const Center(
-                    child: Text('No logs recorded yet.', style: TextStyle(color: Colors.grey)),
-                  );
-                }
-                return SelectionArea(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(12),
-                    itemCount: logs.length,
-                    itemBuilder: (context, index) {
-                      final line = logs[index];
-                      final isErr = line.contains('[ERROR]') ||
-                          line.contains('[DIAGNOSIS]') ||
-                          line.contains('PLATFORM ERROR') ||
-                          line.contains('failed');
-                      final isWarn = line.contains('[WARN]') || line.contains('null') || line.contains('None');
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2.5),
-                        child: Text(
-                          line,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 11.5,
-                            height: 1.35,
-                            color: isErr
-                                ? AppConstants.expenseRed
-                                : isWarn
-                                    ? const Color(0xFFE5A93B)
-                                    : (isDark ? Colors.grey[300] : Colors.grey[850]),
-                          ),
-                        ),
-                      );
-                    },
+                    line,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 11.5,
+                      color: isErr
+                          ? AppConstants.expenseRed
+                          : isWarn
+                              ? const Color(0xFFE5A93B)
+                              : (isDark ? Colors.grey[300] : Colors.grey[850]),
+                    ),
                   ),
                 );
               },
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// FIRST-INSTALL WELCOME & FRIENDLY PERMISSION SETUP FLOW
+// ===========================================================================
+class WelcomeSetupScreen extends StatefulWidget {
+  final VoidCallback onFinished;
+  const WelcomeSetupScreen({Key? key, required this.onFinished}) : super(key: key);
+
+  @override
+  State<WelcomeSetupScreen> createState() => _WelcomeSetupScreenState();
+}
+
+class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
+  static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
+  int _step = 0;
+
+  Future<void> _handleNotificationStep(bool enable) async {
+    HapticFeedback.mediumImpact();
+    final prefs = Provider.of<ThemeProvider>(context, listen: false);
+    if (enable) {
+      try {
+        await _nativeBridge.invokeMethod('requestNotificationPermission');
+      } catch (_) {}
+      await prefs.setDailyReminder(enabled: true, hour: 21, minute: 0);
+      try {
+        await _nativeBridge.invokeMethod('scheduleDailyReminder', {
+          'enabled': true,
+          'hour': 21,
+          'minute': 0,
+        });
+      } catch (_) {}
+    } else {
+      await prefs.setDailyReminder(enabled: false, hour: 21, minute: 0);
+    }
+    if (mounted) setState(() => _step = 2);
+  }
+
+  Future<void> _handleSmsStep(bool enable) async {
+    HapticFeedback.mediumImpact();
+    final prefs = Provider.of<ThemeProvider>(context, listen: false);
+    if (enable) {
+      final granted = await _nativeBridge.invokeMethod<bool>('requestSmsPermission') ?? false;
+      await prefs.setSmsAutoTrack(granted);
+    } else {
+      await prefs.setSmsAutoTrack(false);
+    }
+    await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+    widget.onFinished();
+  }
+
+  Widget _featureTile(bool isDark, IconData icon, String title, String subtitle) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: scheme.primary.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: scheme.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: isDark ? Colors.grey[400] : Colors.grey[700]),
+                ),
+              ],
             ),
           ),
         ],
       ),
     );
   }
-}
-
-// ===========================================================================
-// FIRST-INSTALL FRIENDLY FINANCIAL COACH ONBOARDING SCREEN
-// ===========================================================================
-class WelcomeOnboardingScreen extends StatefulWidget {
-  final MethodChannel nativeBridge;
-  final VoidCallback onFinished;
-
-  const WelcomeOnboardingScreen({
-    Key? key,
-    required this.nativeBridge,
-    required this.onFinished,
-  }) : super(key: key);
-
-  @override
-  State<WelcomeOnboardingScreen> createState() => _WelcomeOnboardingScreenState();
-}
-
-class _WelcomeOnboardingScreenState extends State<WelcomeOnboardingScreen> {
-  int _step = 0; // 0 = Welcome & Purpose, 1 = Notification Coach, 2 = Reassuring SMS Setup
-  int _selectedHour = 21; // Default 9:00 PM
-  int _selectedMinute = 0;
-
-  Future<void> _pickCustomTime() async {
-    HapticFeedback.selectionClick();
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay(hour: _selectedHour, minute: _selectedMinute),
-    );
-    if (picked != null && mounted) {
-      setState(() {
-        _selectedHour = picked.hour;
-        _selectedMinute = picked.minute;
-      });
-    }
-  }
-
-  Future<void> _handleEnableNotifications(ThemeProvider prefs) async {
-    HapticFeedback.mediumImpact();
-    try {
-      await widget.nativeBridge.invokeMethod<bool>('requestNotificationPermission');
-    } catch (_) {}
-    await prefs.setDailyReminder(enabled: true, hour: _selectedHour, minute: _selectedMinute);
-    try {
-      await widget.nativeBridge.invokeMethod('scheduleDailyReminder', {
-        'enabled': true,
-        'hour': _selectedHour,
-        'minute': _selectedMinute,
-      });
-    } catch (_) {}
-    if (mounted) setState(() => _step = 2);
-  }
-
-  Future<void> _handleSkipNotifications(ThemeProvider prefs) async {
-    HapticFeedback.lightImpact();
-    await prefs.setDailyReminder(enabled: false, hour: _selectedHour, minute: _selectedMinute);
-    try {
-      await widget.nativeBridge.invokeMethod('scheduleDailyReminder', {
-        'enabled': false,
-        'hour': _selectedHour,
-        'minute': _selectedMinute,
-      });
-    } catch (_) {}
-    if (mounted) setState(() => _step = 2);
-  }
-
-  Future<void> _handleEnableSms(ThemeProvider prefs) async {
-    HapticFeedback.mediumImpact();
-    bool granted = false;
-    try {
-      granted = await widget.nativeBridge.invokeMethod<bool>('requestSmsPermission') ?? false;
-    } catch (_) {}
-    await prefs.setSmsAutoTrack(granted);
-    await DatabaseHelper.instance.markSmsHandled('__onboarding_completed_v1__', 'done');
-    widget.onFinished();
-  }
-
-  Future<void> _handleSkipSms(ThemeProvider prefs) async {
-    HapticFeedback.lightImpact();
-    await prefs.setSmsAutoTrack(false);
-    await DatabaseHelper.instance.markSmsHandled('__onboarding_completed_v1__', 'done');
-    widget.onFinished();
-  }
-
-  Widget _featureTile({
-    required bool isDark,
-    required IconData icon,
-    required Color accent,
-    required String title,
-    required String subtitle,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: accent.withOpacity(0.14),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: accent, size: 22),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14.5)),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(fontSize: 12.5, height: 1.4, color: isDark ? Colors.grey[400] : Colors.grey[700]),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStep0Welcome(bool isDark, Color accent) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: accent.withOpacity(0.14),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            'WELCOME TO YOUR FINANCIAL COMPANION',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: accent),
-          ),
-        ),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Text(
-              'Fin',
-              style: TextStyle(
-                color: isDark ? Colors.white : const Color(0xFF0E1726),
-                fontWeight: FontWeight.w900,
-                fontSize: 34,
-              ),
-            ),
-            Text(
-              'Trax',
-              style: TextStyle(color: accent, fontWeight: FontWeight.w300, fontSize: 34),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Most of us work hard for our money, yet at the end of the month we still wonder, "Where did it all go?" FinTrax was built to replace that guesswork with effortless clarity.',
-          style: TextStyle(fontSize: 13.5, height: 1.48, color: isDark ? Colors.grey[300] : Colors.grey[800]),
-        ),
-        const SizedBox(height: 18),
-        _featureTile(
-          isDark: isDark,
-          icon: Icons.menu_book_rounded,
-          accent: accent,
-          title: 'Dedicated Books & Lending (Udhaar) Ledgers',
-          subtitle: 'Create separate books for Monthly Expenses, Groceries, Shopping, or Money Lent to friends—and even log a single entry into multiple books at once.',
-        ),
-        _featureTile(
-          isDark: isDark,
-          icon: Icons.insights_rounded,
-          accent: accent,
-          title: 'Monthly Financial Insights & PDF Statements',
-          subtitle: 'See exactly how much went into Shopping, Groceries, and Savings on the 1st of every month, and export clean PDF statements anytime.',
-        ),
-        Container(
-          margin: const EdgeInsets.only(top: 4),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: AppConstants.incomeGreen.withOpacity(isDark ? 0.12 : 0.08),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.35)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 22),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '100% Offline • Zero Data Collection • Zero Ads • Forever Free',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'FinTrax works completely offline on your phone. We have no servers, we never collect or share your financial data, we never show ads, and every feature will remain 100% free forever.',
-                      style: TextStyle(fontSize: 12, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-            onPressed: () {
-              HapticFeedback.lightImpact();
-              setState(() => _step = 1);
-            },
-            icon: const Icon(Icons.arrow_forward_rounded),
-            label: const Text('Continue to Set Up', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStep1NotificationCoach(bool isDark, Color accent, ThemeProvider prefs) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: accent.withOpacity(0.14),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            'STEP 1 OF 2 • STAY FINANCIALLY AWARE',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: accent),
-          ),
-        ),
-        const SizedBox(height: 14),
-        const Text(
-          'Never Miss an Entry with a Friendly Evening Check-In',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, height: 1.2),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'The secret to mastering your money isn\'t complicated budgets—it\'s simply not forgetting the small expenses you made during a busy day.\n\nWhen you enable notifications, FinTrax acts like a friendly financial coach: it gives you one gentle evening check-in so you can log today\'s entries in 30 seconds before you forget, and lets you know on the 1st of every month when your Monthly Expense Summary is ready.',
-          style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
-        ),
-        const SizedBox(height: 18),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.access_time_rounded, color: accent, size: 24),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Preferred Reminder Time', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Default is 9:00 PM (you can change or turn this off anytime in Settings)',
-                      style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: _pickCustomTime,
-                style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                child: Text(
-                  AppConstants.formatTimeOfDay(_selectedHour, _selectedMinute),
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-            onPressed: () => _handleEnableNotifications(prefs),
-            icon: const Icon(Icons.notifications_active_outlined),
-            label: const Text('Enable Daily Check-In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Center(
-          child: TextButton(
-            onPressed: () => _handleSkipNotifications(prefs),
-            child: Text('Not now, I\'ll remember on my own', style: TextStyle(color: Colors.grey[500])),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStep2ReassuringSms(bool isDark, Color accent, ThemeProvider prefs) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: accent.withOpacity(0.14),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            'STEP 2 OF 2 • EFFORTLESS EXPENSE TRACKING',
-            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: accent),
-          ),
-        ),
-        const SizedBox(height: 14),
-        const Text(
-          'Why FinTrax Asks for SMS Permission (And How Your Privacy is Protected)',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, height: 1.25),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          'It is completely natural to feel cautious when an app asks for SMS permission—your inbox holds personal messages and OTPs. Here is exactly how FinTrax handles it so you never have to worry:',
-          style: TextStyle(fontSize: 13.5, height: 1.48, color: isDark ? Colors.grey[300] : Colors.grey[800]),
-        ),
-        const SizedBox(height: 16),
-        _featureTile(
-          isDark: isDark,
-          icon: Icons.shield_outlined,
-          accent: AppConstants.incomeGreen,
-          title: '100% On-Device & Offline Processing',
-          subtitle: 'FinTrax has no backend servers. Your SMS messages are scanned locally inside your phone and never leave your device.',
-        ),
-        _featureTile(
-          isDark: isDark,
-          icon: Icons.lock_outline_rounded,
-          accent: accent,
-          title: 'OTPs & Personal Chats are Completely Ignored',
-          subtitle: 'The detector strictly looks for bank & UPI debit/credit alerts (amount, merchant, and date) and skips all OTPs and personal texts.',
-        ),
-        _featureTile(
-          isDark: isDark,
-          icon: Icons.check_circle_outline_rounded,
-          accent: accent,
-          title: 'Saves You From Typing Every UPI Payment',
-          subtitle: 'Instead of typing every ₹40 UPI scan or bank transfer by hand, FinTrax prepares ready-made drafts that you can review and add in one tap.',
-        ),
-        const SizedBox(height: 20),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-            onPressed: () => _handleEnableSms(prefs),
-            icon: const Icon(Icons.sms_outlined),
-            label: const Text('Allow Smart SMS Auto-Track', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Center(
-          child: TextButton(
-            onPressed: () => _handleSkipSms(prefs),
-            child: Text(
-              'Skip — I\'ll type my expenses manually',
-              style: TextStyle(color: Colors.grey[500], fontWeight: FontWeight.w600),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final prefs = Provider.of<ThemeProvider>(context);
     final scheme = Theme.of(context).colorScheme;
-    final accent = prefs.useMaterialYou ? scheme.primary : AppConstants.goldAccent;
 
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(22, 24, 22, 28),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 250),
-              child: _step == 0
-                  ? KeyedSubtree(key: const ValueKey('step0'), child: _buildStep0Welcome(isDark, accent))
-                  : _step == 1
-                      ? KeyedSubtree(key: const ValueKey('step1'), child: _buildStep1NotificationCoach(isDark, accent, prefs))
-                      : KeyedSubtree(key: const ValueKey('step2'), child: _buildStep2ReassuringSms(isDark, accent, prefs)),
-            ),
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 16, 22, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Fin',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : const Color(0xFF0E1726),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 26,
+                        ),
+                      ),
+                      Text(
+                        'Trax',
+                        style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w300, fontSize: 26),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'Step ${_step + 1} of 3',
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: scheme.primary),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _step == 0
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Your Friendly Personal Finance Companion',
+                              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1.25),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'We built FinTrax with one simple goal: to help you truly understand where your hard-earned money goes every day—without complicated spreadsheets or boring accounting.',
+                              style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                            ),
+                            const SizedBox(height: 20),
+                            _featureTile(
+                              isDark,
+                              Icons.menu_book_rounded,
+                              'Smart Expense & Lending (Udhaar) Books',
+                              'Create dedicated books for Monthly Expenses, Groceries, Shopping, or Money Lent to friends so you never forget who owes you.',
+                            ),
+                            _featureTile(
+                              isDark,
+                              Icons.sms_outlined,
+                              'Effortless Bank & UPI SMS Detection',
+                              'Automatically spots bank & UPI alerts on your phone so you can review and add entries in a single tap.',
+                            ),
+                            _featureTile(
+                              isDark,
+                              Icons.library_add_check_rounded,
+                              'Multi-Book Logging & Monthly Insights',
+                              'Save one expense into multiple books at once, export clean PDF statements, and get a full financial summary on the 1st of every month.',
+                            ),
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: AppConstants.incomeGreen.withOpacity(isDark ? 0.12 : 0.08),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.35)),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 22),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          '100% Offline • Zero Data Collection • Forever Free',
+                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'FinTrax works completely offline on your phone. We have no servers, we never collect or share your data, and there are zero ads—forever.',
+                                          style: TextStyle(fontSize: 12, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        )
+                      : _step == 1
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: Icon(Icons.notifications_active_rounded, size: 36, color: scheme.primary),
+                                ),
+                                const SizedBox(height: 18),
+                                const Text(
+                                  'Never Miss an Entry with a Friendly Evening Check-In',
+                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Building financial awareness comes down to one tiny habit: taking 30 seconds in the evening to log what you spent today while it is still fresh in your mind.',
+                                  style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                ),
+                                const SizedBox(height: 16),
+                                _featureTile(
+                                  isDark,
+                                  Icons.schedule_rounded,
+                                  '9:00 PM Daily Check-In (Customizable)',
+                                  'A gentle evening nudge at 9:00 PM so small cash or UPI expenses never slip through the cracks. You can change the time or pause it anytime in Settings.',
+                                ),
+                                _featureTile(
+                                  isDark,
+                                  Icons.insights_rounded,
+                                  '1st-of-the-Month Financial Summary',
+                                  'Get notified on the 1st morning of every month when your previous month\'s shopping, grocery, and savings breakdown is ready.',
+                                ),
+                              ],
+                            )
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: AppConstants.incomeGreen.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: const Icon(Icons.lock_outline_rounded, size: 36, color: AppConstants.incomeGreen),
+                                ),
+                                const SizedBox(height: 18),
+                                const Text(
+                                  'Make Tracking Effortless with Local SMS Auto-Detection',
+                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'We know SMS permission feels sensitive—and you have every right to be cautious! Here is exactly why FinTrax asks for it and how your privacy stays 100% protected:',
+                                  style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                ),
+                                const SizedBox(height: 16),
+                                _featureTile(
+                                  isDark,
+                                  Icons.bolt_rounded,
+                                  'Why It Helps You',
+                                  'Instead of typing every UPI payment or bank transfer by hand, FinTrax spots bank credit/debit alerts and prepares ready-to-save drafts for you.',
+                                ),
+                                _featureTile(
+                                  isDark,
+                                  Icons.phonelink_lock_rounded,
+                                  '100% On-Device & Offline',
+                                  'SMS scanning happens strictly inside your phone. FinTrax has no backend servers—your messages never leave your device.',
+                                ),
+                                _featureTile(
+                                  isDark,
+                                  Icons.shield_outlined,
+                                  'OTPs & Personal Chats Are Ignored',
+                                  'FinTrax automatically ignores OTPs, verification codes, and personal conversations, looking only at transaction amounts.',
+                                ),
+                              ],
+                            ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_step == 0)
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () {
+                    HapticFeedback.lightImpact();
+                    setState(() => _step = 1);
+                  },
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: const Text('Continue to Set Up', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
+                )
+              else if (_step == 1) ...[
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => _handleNotificationStep(true),
+                  icon: const Icon(Icons.notifications_active_outlined),
+                  label: const Text('Enable Reminders & Continue', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 6),
+                TextButton(
+                  onPressed: () => _handleNotificationStep(false),
+                  child: const Text('Skip for now', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                ),
+              ] else ...[
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => _handleSmsStep(true),
+                  icon: const Icon(Icons.verified_user_outlined),
+                  label: const Text('Allow SMS Auto-Track & Start', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 6),
+                TextButton(
+                  onPressed: () => _handleSmsStep(false),
+                  child: const Text('I\'ll enter expenses manually (Skip)', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ],
           ),
         ),
       ),
@@ -722,7 +561,7 @@ class _BooksScreenState extends State<BooksScreen> {
   List<Map<String, dynamic>> _books = [];
   List<ParsedSmsTransaction> _pendingSms = [];
   bool _loading = true;
-  bool _showMonthlyInsightBanner = false;
+  bool _showOnboarding = false;
   BookSort _sortOrder = BookSort.updated;
   Timer? _autoBackupTimer;
 
@@ -749,31 +588,24 @@ class _BooksScreenState extends State<BooksScreen> {
 
     final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
 
-    // Ensure default reminder hour is migrated to 9:00 PM (21:00) on first setup
+    // Migrate default 10:00 PM (22:00) reminder to 9:00 PM (21:00) once
     if (!handledSet.contains('__default_9pm_migrated__')) {
       if (prefs.reminderHour == 22 && prefs.reminderMinute == 0) {
-        await prefs.setDailyReminder(enabled: prefs.dailyReminderEnabled, hour: 21, minute: 0);
+        await prefs.setDailyReminder(
+          enabled: prefs.dailyReminderEnabled,
+          hour: 21,
+          minute: 0,
+        );
       }
       await DatabaseHelper.instance.markSmsHandled('__default_9pm_migrated__', 'done');
     }
 
-    // Show First-Install Welcome & Friendly Coach Setup if not completed yet
-    if (!handledSet.contains('__onboarding_completed_v1__') && mounted) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => WelcomeOnboardingScreen(
-            nativeBridge: _nativeBridge,
-            onFinished: () {
-              Navigator.of(context).pop();
-              _loadBooks();
-            },
-          ),
-        ),
-      );
+    // Show First-Install Welcome & Permission Setup if not completed yet
+    if (!handledSet.contains('__onboarding_v1_done__')) {
+      if (mounted) setState(() => _showOnboarding = true);
+      return;
     }
 
-    if (!mounted) return;
     await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
 
     try {
@@ -795,9 +627,6 @@ class _BooksScreenState extends State<BooksScreen> {
     _autoBackupTimer = Timer(nextRun.difference(now), _runSilentDailyBackup);
   }
 
-  /// Ensures that even if the user accidentally clears the 1st-of-the-month notification,
-  /// the next time they open the app in the new month, the Previous Month's Insights
-  /// automatically pop up on the Home screen and show a quick banner during the first 5 days.
   Future<void> _checkAndShowFirstOfMonthInsights() async {
     try {
       bool launchedFromInsightNotif = false;
@@ -806,31 +635,24 @@ class _BooksScreenState extends State<BooksScreen> {
       } catch (_) {}
 
       final now = DateTime.now();
-      final prevMonthDate = DateTime(now.year, now.month - 1, 1);
-      final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
-      final int txCount = (insights['txCount'] as int?) ?? 0;
-      final double lendingGiven = (insights['lendingGiven'] as num?)?.toDouble() ?? 0.0;
-      final bool hasPreviousMonthData = txCount > 0 || lendingGiven > 0;
-
-      final autoPopupKey = '__monthly_insight_shown_${now.year}_${now.month}__';
-      final bannerDismissedKey = '__monthly_banner_dismissed_${now.year}_${now.month}__';
+      final markerKey = '__monthly_insight_shown_${now.year}_${now.month}__';
       final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
 
-      if (hasPreviousMonthData && now.day <= 5 && !handledSet.contains(bannerDismissedKey)) {
-        if (mounted) setState(() => _showMonthlyInsightBanner = true);
-      }
-
       if (launchedFromInsightNotif) {
-        await DatabaseHelper.instance.markSmsHandled(autoPopupKey, 'shown');
+        await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
         if (mounted) _openMonthlyInsightsSheet(initialPreviousMonth: true);
         return;
       }
 
-      // Auto-show on the Home screen the first time the user opens the app in a new month
-      // (even if they cleared the notification or opened the app after the 1st)
-      if (hasPreviousMonthData && !handledSet.contains(autoPopupKey)) {
-        await DatabaseHelper.instance.markSmsHandled(autoPopupKey, 'shown');
-        if (mounted) {
+      // Even if the user cleared the 1st-of-the-month notification, automatically show
+      // the previous month's insights the first time they open the app in the new month!
+      if (!handledSet.contains(markerKey)) {
+        final prevMonthDate = DateTime(now.year, now.month - 1, 1);
+        final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
+        final int txCount = (insights['txCount'] as int?) ?? 0;
+        final double lendingGiven = (insights['lendingGiven'] as num?)?.toDouble() ?? 0.0;
+        await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
+        if ((txCount > 0 || lendingGiven > 0) && mounted) {
           _openMonthlyInsightsSheet(initialPreviousMonth: true);
         }
       }
@@ -1951,7 +1773,6 @@ class _BooksScreenState extends State<BooksScreen> {
   // ===========================================================================
   // GOOGLE DRIVE CLOUD SYNC WITH 3-STAGE AUTOMATIC FALLBACK
   // ===========================================================================
-
   void _showProgressModal(String label) {
     showDialog(
       context: context,
@@ -1998,63 +1819,46 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
-    final sw = Stopwatch()..start();
-    AppLogger.instance.log('====================================================', tag: 'AUTH');
-    AppLogger.instance.log('Starting 3-Stage _signInForDrive(switchAccount=$switchAccount)', tag: 'AUTH');
-
     PlatformException? lastPlatformError;
 
     // STAGE 1: Direct Android OAuth Client
     try {
-      AppLogger.instance.log('Stage 1 [${sw.elapsedMilliseconds}ms]: Trying Direct Android Client...', tag: 'AUTH');
-      if (switchAccount) {
-        await _googleAuth.signOut();
-      }
+      if (switchAccount) await _googleAuth.signOut();
       GoogleSignInAccount? user = _googleAuth.currentUser;
       if (user == null && !switchAccount) {
         user = await _googleAuth.signInSilently();
       }
       user ??= await _googleAuth.signIn();
       if (user != null) {
-        final headers = await user.authHeaders;
-        AppLogger.instance.log('Stage 1 SUCCESS for ${user.email} (headers: ${headers.keys.length})', tag: 'AUTH');
+        await user.authHeaders;
         await prefs.setDriveAccount(user.email);
         return user;
       } else {
-        AppLogger.instance.log('Stage 1 returned null (cancelled).', tag: 'WARN');
         return null;
       }
     } on PlatformException catch (e) {
       lastPlatformError = e;
       AppLogger.instance.log('Stage 1 PlatformException (${e.code}): ${e.message}', tag: 'WARN');
-    } catch (e) {
-      AppLogger.instance.log('Stage 1 error: $e', tag: 'WARN');
-    }
+    } catch (_) {}
 
-    // STAGE 2: Basic Email Sign-In -> requestScopes([drive.appdata])
+    // STAGE 2: Basic Email Sign-In -> requestScopes
     try {
-      AppLogger.instance.log('Stage 2 [${sw.elapsedMilliseconds}ms]: Trying 2-Step Basic SignIn + requestScopes...', tag: 'AUTH');
       final stepAuth = GoogleSignIn(scopes: <String>['email']);
       if (switchAccount) await stepAuth.signOut();
       final user = await stepAuth.signIn();
       if (user != null) {
-        final granted = await stepAuth.requestScopes(<String>[_driveAppDataScope]);
-        AppLogger.instance.log('Stage 2 requestScopes granted=$granted', tag: 'AUTH');
+        await stepAuth.requestScopes(<String>[_driveAppDataScope]);
         await user.authHeaders;
-        AppLogger.instance.log('Stage 2 SUCCESS for ${user.email}', tag: 'AUTH');
         await prefs.setDriveAccount(user.email);
         return user;
       }
     } on PlatformException catch (e) {
       lastPlatformError = e;
       AppLogger.instance.log('Stage 2 PlatformException (${e.code}): ${e.message}', tag: 'WARN');
-    } catch (e) {
-      AppLogger.instance.log('Stage 2 error: $e', tag: 'WARN');
-    }
+    } catch (_) {}
 
     // STAGE 3: Web serverClientId Fallback
     try {
-      AppLogger.instance.log('Stage 3 [${sw.elapsedMilliseconds}ms]: Trying Web serverClientId Fallback...', tag: 'AUTH');
       final webAuth = GoogleSignIn(
         scopes: <String>[_driveAppDataScope],
         serverClientId: _webServerClientId,
@@ -2062,21 +1866,17 @@ class _BooksScreenState extends State<BooksScreen> {
       if (switchAccount) await webAuth.signOut();
       final user = await webAuth.signIn();
       if (user != null) {
-        final headers = await user.authHeaders;
-        AppLogger.instance.log('Stage 3 SUCCESS for ${user.email} (headers: ${headers.keys.length})', tag: 'AUTH');
+        await user.authHeaders;
         await prefs.setDriveAccount(user.email);
         return user;
       }
     } on PlatformException catch (e) {
       lastPlatformError = e;
       AppLogger.instance.log('Stage 3 PlatformException (${e.code}): ${e.message}', tag: 'ERROR');
-    } catch (e) {
-      AppLogger.instance.log('Stage 3 error: $e', tag: 'ERROR');
-    }
+    } catch (_) {}
 
     if (lastPlatformError != null) {
       final diagnosis = AppLogger.explainPlayServicesCode(lastPlatformError.message ?? '', lastPlatformError.code);
-      AppLogger.instance.log(diagnosis, tag: 'DIAGNOSIS');
       if (mounted) {
         _showErrorModal(
           'Google Sign-In Blocked (${lastPlatformError.code})',
@@ -2382,7 +2182,8 @@ class _BooksScreenState extends State<BooksScreen> {
   Widget _buildBooksTab(bool isDark, bool dynamicColors) {
     final scheme = Theme.of(context).colorScheme;
     final accent = dynamicColors ? scheme.primary : AppConstants.goldAccent;
-    final prevMonthName = _monthNames[DateTime(DateTime.now().year, DateTime.now().month - 1, 1).month - 1];
+    final now = DateTime.now();
+    final prevMonthName = _monthNames[DateTime(now.year, now.month - 1, 1).month - 1];
 
     return Scaffold(
       appBar: AppBar(
@@ -2413,36 +2214,30 @@ class _BooksScreenState extends State<BooksScreen> {
       ),
       body: Column(
         children: [
-          if (_showMonthlyInsightBanner)
+          if (now.day <= 5 && _books.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Material(
-                color: scheme.primary.withOpacity(isDark ? 0.18 : 0.12),
+                color: scheme.primary.withOpacity(isDark ? 0.16 : 0.10),
                 borderRadius: BorderRadius.circular(14),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
                   onTap: () => _openMonthlyInsightsSheet(initialPreviousMonth: true),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     child: Row(
                       children: [
                         Icon(Icons.insights_rounded, size: 20, color: scheme.primary),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Your $prevMonthName Expense Summary is ready! Tap to view insights.',
+                            'Your $prevMonthName Expense Insights are ready!',
                             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
                           ),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded, size: 18),
-                          onPressed: () async {
-                            final now = DateTime.now();
-                            final key = '__monthly_banner_dismissed_${now.year}_${now.month}__';
-                            await DatabaseHelper.instance.markSmsHandled(key, 'dismissed');
-                            if (mounted) setState(() => _showMonthlyInsightBanner = false);
-                          },
-                        ),
+                        Text('View', style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w800, fontSize: 12.5)),
+                        const SizedBox(width: 4),
+                        Icon(Icons.arrow_forward_ios_rounded, size: 11, color: scheme.primary),
                       ],
                     ),
                   ),
@@ -2792,7 +2587,7 @@ class _BooksScreenState extends State<BooksScreen> {
               dense: true,
               secondary: Icon(Icons.sms_outlined, color: scheme.primary, size: 21),
               title: const Text('Smart SMS Auto-Track', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
-              subtitle: const Text('Auto-detect bank & UPI SMS offline on your phone', style: TextStyle(fontSize: 11.5)),
+              subtitle: const Text('Auto-detect bank & UPI SMS offline', style: TextStyle(fontSize: 11.5)),
               value: prefs.smsAutoTrack,
               onChanged: (v) async {
                 HapticFeedback.lightImpact();
@@ -2819,18 +2614,22 @@ class _BooksScreenState extends State<BooksScreen> {
                   Icon(Icons.notifications_active_outlined, color: scheme.primary, size: 21),
                   const SizedBox(width: 16),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
-                        const SizedBox(height: 2),
-                        Text(
-                          prefs.dailyReminderEnabled
-                              ? 'Tap the time button to change reminder time'
-                              : 'Reminders paused • Toggle ON to receive daily check-in',
-                          style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
-                        ),
-                      ],
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => _selectReminderTime(prefs),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+                          const SizedBox(height: 2),
+                          Text(
+                            prefs.dailyReminderEnabled
+                                ? 'Tap time to change (${AppConstants.formatTimeOfDay(prefs.reminderHour, prefs.reminderMinute)})'
+                                : 'Reminders paused • Tap switch to enable',
+                            style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   Padding(
@@ -2839,31 +2638,21 @@ class _BooksScreenState extends State<BooksScreen> {
                       borderRadius: BorderRadius.circular(8),
                       onTap: () => _selectReminderTime(prefs),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: prefs.dailyReminderEnabled
-                              ? scheme.primary.withOpacity(0.12)
-                              : Colors.grey.withOpacity(0.10),
+                          color: scheme.primary.withOpacity(prefs.dailyReminderEnabled ? 0.14 : 0.06),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: prefs.dailyReminderEnabled
-                                ? scheme.primary.withOpacity(0.35)
-                                : Colors.grey.withOpacity(0.3),
-                          ),
+                          border: Border.all(color: scheme.primary.withOpacity(prefs.dailyReminderEnabled ? 0.35 : 0.15)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              Icons.access_time_rounded,
-                              size: 13,
-                              color: prefs.dailyReminderEnabled ? scheme.primary : Colors.grey,
-                            ),
+                            Icon(Icons.schedule_rounded, size: 13, color: prefs.dailyReminderEnabled ? scheme.primary : Colors.grey),
                             const SizedBox(width: 4),
                             Text(
                               AppConstants.formatTimeOfDay(prefs.reminderHour, prefs.reminderMinute),
                               style: TextStyle(
-                                fontWeight: FontWeight.w700,
+                                fontWeight: FontWeight.w800,
                                 fontSize: 11.5,
                                 color: prefs.dailyReminderEnabled ? scheme.primary : Colors.grey,
                               ),
@@ -3042,6 +2831,16 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_showOnboarding) {
+      return WelcomeSetupScreen(
+        onFinished: () {
+          setState(() => _showOnboarding = false);
+          _initBackgroundTasks();
+          _loadBooks();
+        },
+      );
+    }
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final prefs = Provider.of<ThemeProvider>(context);
     return Scaffold(
