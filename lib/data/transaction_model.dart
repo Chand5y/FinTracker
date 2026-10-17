@@ -6,6 +6,7 @@ class TransactionModel {
   final String name;
   final String category;
   final String notes;
+  final String smsBody;
   final String imagePath;
   final DateTime date;
   final String currency;
@@ -19,11 +20,46 @@ class TransactionModel {
     required this.name,
     required this.category,
     this.notes = '',
+    this.smsBody = '',
     this.imagePath = '',
     required this.date,
     required this.currency,
     required this.paymentMode,
   });
+
+  /// Returns the permanent SMS text (falls back to notes for older SMS entries)
+  String get effectiveSmsText => smsBody.isNotEmpty ? smsBody : notes;
+
+  TransactionModel copyWith({
+    int? id,
+    bool clearId = false,
+    int? bookId,
+    String? type,
+    double? amount,
+    String? name,
+    String? category,
+    String? notes,
+    String? smsBody,
+    String? imagePath,
+    DateTime? date,
+    String? currency,
+    String? paymentMode,
+  }) {
+    return TransactionModel(
+      id: clearId ? null : (id ?? this.id),
+      bookId: bookId ?? this.bookId,
+      type: type ?? this.type,
+      amount: amount ?? this.amount,
+      name: name ?? this.name,
+      category: category ?? this.category,
+      notes: notes ?? this.notes,
+      smsBody: smsBody ?? this.smsBody,
+      imagePath: imagePath ?? this.imagePath,
+      date: date ?? this.date,
+      currency: currency ?? this.currency,
+      paymentMode: paymentMode ?? this.paymentMode,
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -34,6 +70,7 @@ class TransactionModel {
       'name': name,
       'category': category,
       'notes': notes,
+      'smsBody': smsBody,
       'imagePath': imagePath,
       'date': date.toIso8601String(),
       'currency': currency,
@@ -42,18 +79,21 @@ class TransactionModel {
   }
 
   factory TransactionModel.fromMap(Map<String, dynamic> map) {
+    final String rawNotes = map['notes']?.toString() ?? '';
+    final String rawSms = map['smsBody']?.toString() ?? '';
     return TransactionModel(
-      id: map['id'],
-      bookId: map['bookId'],
-      type: map['type'],
-      amount: map['amount'],
-      name: map['name'],
-      category: map['category'] ?? '',
-      notes: map['notes'] ?? '',
-      imagePath: map['imagePath'] ?? '',
-      date: DateTime.parse(map['date']),
-      currency: map['currency'] ?? '₹',
-      paymentMode: map['paymentMode'] ?? 'Cash',
+      id: (map['id'] as num?)?.toInt(),
+      bookId: (map['bookId'] as num).toInt(),
+      type: map['type']?.toString() ?? 'Expense',
+      amount: (map['amount'] as num).toDouble(),
+      name: map['name']?.toString() ?? '',
+      category: map['category']?.toString() ?? '',
+      notes: rawNotes,
+      smsBody: rawSms.isNotEmpty ? rawSms : rawNotes,
+      imagePath: map['imagePath']?.toString() ?? '',
+      date: DateTime.tryParse(map['date']?.toString() ?? '') ?? DateTime.now(),
+      currency: map['currency']?.toString() ?? '₹',
+      paymentMode: map['paymentMode']?.toString() ?? 'Cash',
     );
   }
 }
