@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -15,6 +17,301 @@ import 'dashboard_screen.dart';
 import 'add_transaction_screen.dart';
 
 enum BookSort { updated, created, aToZ, zToA }
+
+// ===========================================================================
+// BUILT-IN BACKEND DIAGNOSTIC LOGGER
+// ===========================================================================
+class AppLogger {
+  static final AppLogger instance = AppLogger._internal();
+  AppLogger._internal();
+
+  static const MethodChannel _nativeChannel = MethodChannel('com.chandankumar.fintrack/sms');
+  final List<String> _logs = <String>[];
+  final ValueNotifier<int> logNotifier = ValueNotifier<int>(0);
+
+  void log(String message, {String tag = 'INFO'}) {
+    final now = DateTime.now();
+    final ts = '${now.hour.toString().padLeft(2, '0')}:'
+        '${now.minute.toString().padLeft(2, '0')}:'
+        '${now.second.toString().padLeft(2, '0')}.'
+        '${now.millisecond.toString().padLeft(3, '0')}';
+    final entry = '[$ts][$tag] $message';
+    _logs.add(entry);
+    debugPrint(entry);
+    logNotifier.value = _logs.length;
+  }
+
+  List<String> get logs => List<String>.unmodifiable(_logs);
+
+  String dumpAllText() {
+    final header = StringBuffer()
+      ..writeln('====================================================')
+      ..writeln('FINTRAX BACKEND DIAGNOSTIC LOG DUMP')
+      ..writeln('Generated At: ${DateTime.now().toIso8601String()}')
+      ..writeln('Platform: ${Platform.operatingSystem} (${Platform.operatingSystemVersion})')
+      ..writeln('Dart Version: ${Platform.version}')
+      ..writeln('Total Entries: ${_logs.length}')
+      ..writeln('====================================================\n');
+    return '$header${_logs.join('\n')}\n';
+  }
+
+  void clear() {
+    _logs.clear();
+    logNotifier.value = 0;
+    log('Diagnostic logs cleared by user.', tag: 'SYSTEM');
+  }
+
+  Future<void> logRuntimeEnvironment(GoogleSignIn googleAuth, ThemeProvider prefs) async {
+    log('--- Inspecting Runtime Environment ---', tag: 'ENV');
+    log('OS: ${Platform.operatingSystem} | Version: ${Platform.operatingSystemVersion}', tag: 'ENV');
+    try {
+      final cmdlineFile = File('/proc/self/cmdline');
+      if (await cmdlineFile.exists()) {
+        final rawCmd = await cmdlineFile.readAsString();
+        final pkgName = rawCmd.split('\x00').first.trim();
+        log('Running Android Process / Package Name: "$pkgName"', tag: 'ENV');
+      }
+    } catch (e) {
+      log('Could not read /proc/self/cmdline: $e', tag: 'ENV');
+    }
+
+    try {
+      final mapsFile = File('/proc/self/maps');
+      if (await mapsFile.exists()) {
+        final lines = await mapsFile.readAsLines();
+        final apkLine = lines.firstWhere(
+          (l) => l.contains('base.apk'),
+          orElse: () => '',
+        );
+        if (apkLine.isNotEmpty) {
+          final idx = apkLine.indexOf('/');
+          final apkPath = idx >= 0 ? apkLine.substring(idx).trim() : apkLine;
+          log('Installed APK Path: $apkPath', tag: 'ENV');
+          final apkFile = File(apkPath);
+          if (await apkFile.exists()) {
+            final len = await apkFile.length();
+            log('Installed APK Size: $len bytes', tag: 'ENV');
+          }
+        }
+      }
+    } catch (e) {
+      log('Could not inspect APK path: $e', tag: 'ENV');
+    }
+
+    log('GoogleSignIn Configured Scopes: ${googleAuth.scopes.join(", ")}', tag: 'OAUTH_CFG');
+    log('GoogleSignIn SignInOption: ${googleAuth.signInOption}', tag: 'OAUTH_CFG');
+    log('GoogleSignIn clientId (override): ${googleAuth.clientId ?? "null (using Android package + SHA-1)"}', tag: 'OAUTH_CFG');
+    log('GoogleSignIn serverClientId: ${googleAuth.serverClientId ?? "null (none)"}', tag: 'OAUTH_CFG');
+    log('GoogleSignIn forceCodeForRefreshToken: ${googleAuth.forceCodeForRefreshToken}', tag: 'OAUTH_CFG');
+    log('Saved Drive Account in Prefs: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
+    log('Last Backup Timestamp in Prefs: "${prefs.lastBackupIso.isEmpty ? "NONE" : prefs.lastBackupIso}"', tag: 'PREFS');
+    log('Last Auto-Backup Day in Prefs: "${prefs.lastAutoBackupDay.isEmpty ? "NONE" : prefs.lastAutoBackupDay}"', tag: 'PREFS');
+    log('--- Runtime Environment Check Complete ---', tag: 'ENV');
+  }
+
+  static String explainPlayServicesCode(String rawMessage, String code) {
+    final combined = '$code $rawMessage';
+    if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
+      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the (Package Name + SHA-1) pair. '
+          'Causes: (1) The Android OAuth Client in Google Cloud Console does not match package "com.chandsy.fintrax" '
+          'or SHA-1 "80:B1:E8:41:F5:67:D8:0D:3A:61:06:3D:6A:75:CB:96:B7:A3:28:45", '
+          '(2) A duplicate OAuth client with the same SHA-1 exists in ANOTHER Google Cloud/Firebase project, or '
+          '(3) OAuth Consent Screen is missing a User Support Email / Developer Email.';
+    }
+    if (combined.contains('12500:')) {
+      return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete '
+          '(missing Support Email, App Name, or Developer Contact Email), or the email being used is not added '
+          'under "Test Users" while the OAuth Consent Screen is in "Testing" mode.';
+    }
+    if (combined.contains('12501:')) {
+      return 'CODE 12501 (SIGN_IN_CANCELLED): The account picker was closed or cancelled before completion, '
+          'or blocked by an unverified consent screen.';
+    }
+    if (combined.contains('12502:')) {
+      return 'CODE 12502 (SIGN_IN_CURRENTLY_IN_PROGRESS): Another sign-in request is already active.';
+    }
+    if (combined.contains('7:')) {
+      return 'CODE 7 (NETWORK_ERROR): Network connection failed while contacting Google Play Services.';
+    }
+    if (combined.contains('8:')) {
+      return 'CODE 8 (INTERNAL_ERROR): Internal Google Play Services error. Retrying or clearing Play Services cache may help.';
+    }
+    return 'Unmapped PlatformException ($code): $rawMessage';
+  }
+
+  Future<String?> saveLogsToDownloads() async {
+    final fileName = 'FinTrax_Debug_Log_${DateTime.now().millisecondsSinceEpoch}.txt';
+    final fullText = dumpAllText();
+    final bytes = Uint8List.fromList(utf8.encode(fullText));
+
+    // Attempt 1: Direct write to /storage/emulated/0/Download
+    try {
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      if (await downloadDir.exists()) {
+        final outFile = File('${downloadDir.path}/$fileName');
+        await outFile.writeAsBytes(bytes, flush: true);
+        log('Saved log directly to ${outFile.path}', tag: 'EXPORT');
+        return outFile.path;
+      }
+    } catch (e) {
+      log('Direct /Download write blocked by Android Scoped Storage ($e). Falling back to system file saver...', tag: 'EXPORT');
+    }
+
+    // Attempt 2: Use Native Android SAF Document Creator (saves directly into Downloads without permissions)
+    try {
+      final saved = await _nativeChannel.invokeMethod<bool>('savePdfToDownloads', {
+            'bytes': bytes,
+            'fileName': fileName,
+          }) ??
+          false;
+      if (saved) {
+        log('Saved log via system Downloads dialog as $fileName', tag: 'EXPORT');
+        return 'Downloads/$fileName';
+      }
+    } catch (e) {
+      log('Native document save failed: $e', tag: 'EXPORT');
+    }
+    return null;
+  }
+}
+
+// ===========================================================================
+// DIAGNOSTIC LOG VIEWER SCREEN
+// ===========================================================================
+class DebugLogsScreen extends StatelessWidget {
+  const DebugLogsScreen({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Diagnostic Logs', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.copy_all_rounded),
+            tooltip: 'Copy All Logs',
+            onPressed: () async {
+              HapticFeedback.lightImpact();
+              final text = AppLogger.instance.dumpAllText();
+              await Clipboard.setData(ClipboardData(text: text));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('All diagnostic logs copied to clipboard!'),
+                    backgroundColor: AppConstants.incomeGreen,
+                  ),
+                );
+              }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_rounded),
+            tooltip: 'Clear Logs',
+            onPressed: () {
+              HapticFeedback.mediumImpact();
+              AppLogger.instance.clear();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Logs cleared.')),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.download_rounded),
+            tooltip: 'Save .txt to Downloads',
+            onPressed: () async {
+              HapticFeedback.mediumImpact();
+              final savedPath = await AppLogger.instance.saveLogsToDownloads();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      savedPath != null
+                          ? 'Log saved to: $savedPath'
+                          : 'Save cancelled or failed. Use the Copy button to copy logs.',
+                    ),
+                    backgroundColor: savedPath != null ? AppConstants.incomeGreen : AppConstants.expenseRed,
+                  ),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            color: isDark ? const Color(0xFF161922) : const Color(0xFFF3EFE6),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, size: 16, color: Colors.grey),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Tap Download to save as .txt in Downloads, or Copy to paste.',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                  ),
+                ),
+                ValueListenableBuilder<int>(
+                  valueListenable: AppLogger.instance.logNotifier,
+                  builder: (_, count, __) => Text(
+                    '$count lines',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.grey),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ValueListenableBuilder<int>(
+              valueListenable: AppLogger.instance.logNotifier,
+              builder: (context, _, __) {
+                final logs = AppLogger.instance.logs;
+                if (logs.isEmpty) {
+                  return const Center(
+                    child: Text('No logs recorded yet.', style: TextStyle(color: Colors.grey)),
+                  );
+                }
+                return SelectionArea(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: logs.length,
+                    itemBuilder: (context, index) {
+                      final line = logs[index];
+                      final isErr = line.contains('[ERROR]') ||
+                          line.contains('[DIAGNOSIS]') ||
+                          line.contains('PLATFORM ERROR') ||
+                          line.contains('failed');
+                      final isWarn = line.contains('[WARN]') || line.contains('null') || line.contains('None');
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2.5),
+                        child: Text(
+                          line,
+                          style: TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 11.5,
+                            height: 1.35,
+                            color: isErr
+                                ? AppConstants.expenseRed
+                                : isWarn
+                                    ? const Color(0xFFE5A93B)
+                                    : (isDark ? Colors.grey[300] : Colors.grey[850]),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class BooksScreen extends StatefulWidget {
   const BooksScreen({Key? key}) : super(key: key);
@@ -42,6 +339,7 @@ class _BooksScreenState extends State<BooksScreen> {
   @override
   void initState() {
     super.initState();
+    AppLogger.instance.log('BooksScreen.initState() called.', tag: 'LIFECYCLE');
     _loadBooks();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initBackgroundTasks());
   }
@@ -59,13 +357,21 @@ class _BooksScreenState extends State<BooksScreen> {
     }
     if (!mounted) return;
 
+    await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
+
     try {
       await _nativeBridge.invokeMethod('scheduleDailyReminder', {
         'enabled': prefs.dailyReminderEnabled,
         'hour': prefs.reminderHour,
         'minute': prefs.reminderMinute,
       });
-    } catch (_) {}
+      AppLogger.instance.log(
+        'Scheduled daily reminder (enabled=${prefs.dailyReminderEnabled}, time=${prefs.reminderHour}:${prefs.reminderMinute})',
+        tag: 'INIT',
+      );
+    } catch (e) {
+      AppLogger.instance.log('scheduleDailyReminder error: $e', tag: 'WARN');
+    }
 
     await _runSilentDailyBackup();
 
@@ -82,17 +388,30 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _runSilentDailyBackup() async {
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
-    if (prefs.driveAccount.isEmpty) return;
+    if (prefs.driveAccount.isEmpty) {
+      AppLogger.instance.log('Silent daily backup skipped: no connected driveAccount in prefs.', tag: 'AUTO_SYNC');
+      return;
+    }
 
     final currentBooks = await DatabaseHelper.instance.getBooksWithBalances();
-    if (currentBooks.isEmpty) return;
+    if (currentBooks.isEmpty) {
+      AppLogger.instance.log('Silent daily backup skipped: 0 local books.', tag: 'AUTO_SYNC');
+      return;
+    }
 
     final today = _todayStamp();
-    if (prefs.lastAutoBackupDay == today) return;
+    if (prefs.lastAutoBackupDay == today) {
+      AppLogger.instance.log('Silent daily backup skipped: already backed up today ($today).', tag: 'AUTO_SYNC');
+      return;
+    }
 
     try {
-      final account = await _googleAuth.signInSilently();
-      if (account == null) return;
+      AppLogger.instance.log('Starting silent daily backup for ${prefs.driveAccount}...', tag: 'AUTO_SYNC');
+      final account = await _googleAuth.signInSilently(suppressErrors: false);
+      if (account == null) {
+        AppLogger.instance.log('Silent daily backup: signInSilently returned null.', tag: 'WARN');
+        return;
+      }
       final headers = await account.authHeaders;
       final payload = await DatabaseHelper.instance.exportDatabaseJson();
       final uploadedId = await _pushBackupToDrive(headers, payload);
@@ -101,8 +420,11 @@ class _BooksScreenState extends State<BooksScreen> {
           isoTimestamp: DateTime.now().toIso8601String(),
           dayKey: today,
         );
+        AppLogger.instance.log('Silent daily backup succeeded (fileId=$uploadedId).', tag: 'AUTO_SYNC');
       }
-    } catch (_) {}
+    } catch (e, st) {
+      AppLogger.instance.log('Silent daily backup failed: $e\n$st', tag: 'ERROR');
+    }
   }
 
   Future<void> _loadBooks() async {
@@ -135,7 +457,7 @@ class _BooksScreenState extends State<BooksScreen> {
       if (mounted) setState(() => _books = rows);
       await _refreshSmsInbox();
     } catch (e) {
-      debugPrint('Book load error: $e');
+      AppLogger.instance.log('Book load error: $e', tag: 'ERROR');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -601,7 +923,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // GOOGLE DRIVE CLOUD SYNC (v3 appDataFolder)
+  // GOOGLE DRIVE CLOUD SYNC (v3 appDataFolder) WITH DEEP DIAGNOSTIC LOGGING
   // ===========================================================================
 
   void _showProgressModal(String label) {
@@ -634,57 +956,135 @@ class _BooksScreenState extends State<BooksScreen> {
           ],
         ),
         content: SingleChildScrollView(child: Text(body, style: const TextStyle(fontSize: 13, height: 1.45))),
-        actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const DebugLogsScreen()));
+            },
+            icon: const Icon(Icons.bug_report_outlined, size: 18),
+            label: const Text('View Logs'),
+          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+        ],
       ),
     );
   }
 
-    Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
-    AppLogger.instance.log('Initiating Google Sign-In flow (switchAccount: $switchAccount)...');
+  Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
+    final sw = Stopwatch()..start();
+    AppLogger.instance.log('====================================================', tag: 'AUTH');
+    AppLogger.instance.log(
+      'Starting _signInForDrive(switchAccount=$switchAccount, savedEmail="${prefs.driveAccount}")',
+      tag: 'AUTH',
+    );
+    await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
+
     try {
+      final alreadySignedIn = await _googleAuth.isSignedIn();
+      AppLogger.instance.log('Step 1 [${sw.elapsedMilliseconds}ms]: _googleAuth.isSignedIn() => $alreadySignedIn', tag: 'AUTH');
+
       if (switchAccount) {
-        AppLogger.instance.log('Signing out existing Google user session...');
+        AppLogger.instance.log('Step 2 [${sw.elapsedMilliseconds}ms]: Calling _googleAuth.signOut() for account switch...', tag: 'AUTH');
         await _googleAuth.signOut();
+        AppLogger.instance.log('Step 2b [${sw.elapsedMilliseconds}ms]: _googleAuth.signOut() completed.', tag: 'AUTH');
       }
+
       GoogleSignInAccount? user = _googleAuth.currentUser;
-      AppLogger.instance.log('Current Google user in memory: ${user?.email ?? "None"}');
-      
+      AppLogger.instance.log(
+        'Step 3 [${sw.elapsedMilliseconds}ms]: _googleAuth.currentUser => ${user != null ? "${user.email} (id=${user.id})" : "null"}',
+        tag: 'AUTH',
+      );
+
       if (user == null && !switchAccount) {
-        AppLogger.instance.log('Attempting signInSilently()...');
-        user = await _googleAuth.signInSilently();
-        AppLogger.instance.log('signInSilently result: ${user?.email ?? "Null"}');
+        AppLogger.instance.log(
+          'Step 4 [${sw.elapsedMilliseconds}ms]: Attempting _googleAuth.signInSilently(suppressErrors: false)...',
+          tag: 'AUTH',
+        );
+        try {
+          user = await _googleAuth.signInSilently(suppressErrors: false);
+          AppLogger.instance.log(
+            'Step 4b [${sw.elapsedMilliseconds}ms]: signInSilently succeeded => ${user?.email ?? "null"}',
+            tag: 'AUTH',
+          );
+        } on PlatformException catch (silentEx) {
+          AppLogger.instance.log(
+            'Step 4b [${sw.elapsedMilliseconds}ms]: signInSilently threw PlatformException -> '
+            'code="${silentEx.code}", message="${silentEx.message}", details="${silentEx.details}"',
+            tag: 'WARN',
+          );
+          AppLogger.instance.log(
+            AppLogger.explainPlayServicesCode(silentEx.message ?? '', silentEx.code),
+            tag: 'DIAGNOSIS',
+          );
+        } catch (silentErr) {
+          AppLogger.instance.log('Step 4b [${sw.elapsedMilliseconds}ms]: signInSilently error: $silentErr', tag: 'WARN');
+        }
       }
-      
+
       if (user == null) {
-        AppLogger.instance.log('Launching interactive signIn() prompt...');
+        AppLogger.instance.log(
+          'Step 5 [${sw.elapsedMilliseconds}ms]: Launching interactive _googleAuth.signIn() picker...',
+          tag: 'AUTH',
+        );
         user = await _googleAuth.signIn();
-        AppLogger.instance.log('Interactive signIn result: ${user?.email ?? "Cancelled by user"}');
+        AppLogger.instance.log(
+          'Step 5b [${sw.elapsedMilliseconds}ms]: Interactive signIn() returned => '
+          '${user != null ? "email=${user.email}, id=${user.id}, displayName=${user.displayName}, serverAuthCode=${user.serverAuthCode}" : "null (user cancelled or dismissed picker)"}',
+          tag: 'AUTH',
+        );
       }
 
-      if (user == null) return null;
+      if (user == null) {
+        AppLogger.instance.log('Sign-in flow ended: user is null.', tag: 'WARN');
+        return null;
+      }
 
-      AppLogger.instance.log('Successfully authenticated as ${user.email}. Fetching auth headers...');
+      AppLogger.instance.log('Step 6 [${sw.elapsedMilliseconds}ms]: Inspecting GoogleSignInAuthentication tokens...', tag: 'AUTH');
+      final googleTokens = await user.authentication;
+      AppLogger.instance.log(
+        'Step 6b [${sw.elapsedMilliseconds}ms]: accessToken present=${googleTokens.accessToken != null && googleTokens.accessToken!.isNotEmpty} '
+        '(len=${googleTokens.accessToken?.length ?? 0}), '
+        'idToken present=${googleTokens.idToken != null && googleTokens.idToken!.isNotEmpty} '
+        '(len=${googleTokens.idToken?.length ?? 0})',
+        tag: 'AUTH',
+      );
+
+      AppLogger.instance.log('Step 7 [${sw.elapsedMilliseconds}ms]: Requesting user.authHeaders...', tag: 'AUTH');
       final headers = await user.authHeaders;
-      AppLogger.instance.log('Auth headers acquired successfully. Token count: ${headers.keys.length}');
+      AppLogger.instance.log(
+        'Step 7b [${sw.elapsedMilliseconds}ms]: authHeaders received. Keys: ${headers.keys.toList()}',
+        tag: 'AUTH',
+      );
 
       await prefs.setDriveAccount(user.email);
+      AppLogger.instance.log('Step 8 [${sw.elapsedMilliseconds}ms]: Sign-In complete for ${user.email}!', tag: 'AUTH');
       return user;
-    } on PlatformException catch (e) {
-      AppLogger.instance.log('PLATFORM ERROR (${e.code}): ${e.message} | Details: ${e.details}');
+    } on PlatformException catch (e, stack) {
+      final diagnosis = AppLogger.explainPlayServicesCode(e.message ?? '', e.code);
+      AppLogger.instance.log(
+        'PLATFORM ERROR after ${sw.elapsedMilliseconds}ms:\n'
+        '  • Code: ${e.code}\n'
+        '  • Message: ${e.message}\n'
+        '  • Details: ${e.details} (type: ${e.details?.runtimeType})\n'
+        '  • StackTrace:\n$stack',
+        tag: 'ERROR',
+      );
+      AppLogger.instance.log(diagnosis, tag: 'DIAGNOSIS');
+
       if (mounted) {
         _showErrorModal(
           'Google Sign-In Blocked (${e.code})',
-          'Google Play Services rejected the sign-in:\n${e.message ?? e.toString()}',
+          'Google Play Services rejected the sign-in:\n${e.message ?? e.toString()}\n\n$diagnosis',
         );
       }
       return null;
     } catch (e, stack) {
-      AppLogger.instance.log('UNKNOWN EXCEPTION: $e\nStack: $stack');
+      AppLogger.instance.log('UNEXPECTED SIGN-IN EXCEPTION after ${sw.elapsedMilliseconds}ms: $e\nStack:\n$stack', tag: 'ERROR');
       if (mounted) _showErrorModal('Sign-In Error', e.toString());
       return null;
     }
-    }
-  
+  }
 
   Future<String?> _locateBackupFileId(Map<String, String> headers) async {
     final uri = Uri.https('www.googleapis.com', '/drive/v3/files', {
@@ -693,21 +1093,30 @@ class _BooksScreenState extends State<BooksScreen> {
       'fields': 'files(id,name,modifiedTime)',
       'pageSize': '1',
     });
+    AppLogger.instance.log('GET $uri', tag: 'DRIVE_API');
     final resp = await http.get(uri, headers: headers);
+    AppLogger.instance.log('Drive list response [${resp.statusCode}]: ${resp.body}', tag: 'DRIVE_API');
     if (resp.statusCode != 200) {
       throw Exception('Drive list failed (${resp.statusCode}): ${resp.body}');
     }
     final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
     final list = (decoded['files'] as List<dynamic>?) ?? [];
-    if (list.isEmpty) return null;
-    return (list.first as Map<String, dynamic>)['id']?.toString();
+    if (list.isEmpty) {
+      AppLogger.instance.log('No existing backup file found in appDataFolder.', tag: 'DRIVE_API');
+      return null;
+    }
+    final foundId = (list.first as Map<String, dynamic>)['id']?.toString();
+    AppLogger.instance.log('Located existing backup fileId: $foundId', tag: 'DRIVE_API');
+    return foundId;
   }
 
   Future<String?> _pushBackupToDrive(Map<String, String> headers, String jsonPayload) async {
+    AppLogger.instance.log('Preparing to push backup (${jsonPayload.length} chars)...', tag: 'DRIVE_API');
     String? fileId = await _locateBackupFileId(headers);
 
     if (fileId == null) {
       final createUri = Uri.parse('https://www.googleapis.com/drive/v3/files');
+      AppLogger.instance.log('Creating new file in appDataFolder via POST $createUri', tag: 'DRIVE_API');
       final createResp = await http.post(
         createUri,
         headers: {...headers, 'Content-Type': 'application/json; charset=UTF-8'},
@@ -716,6 +1125,7 @@ class _BooksScreenState extends State<BooksScreen> {
           'parents': ['appDataFolder'],
         }),
       );
+      AppLogger.instance.log('Create file response [${createResp.statusCode}]: ${createResp.body}', tag: 'DRIVE_API');
       if (createResp.statusCode != 200 && createResp.statusCode != 201) {
         throw Exception('Drive create failed (${createResp.statusCode}): ${createResp.body}');
       }
@@ -728,11 +1138,13 @@ class _BooksScreenState extends State<BooksScreen> {
     }
 
     final uploadUri = Uri.parse('https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media');
+    AppLogger.instance.log('Uploading payload via PATCH $uploadUri', tag: 'DRIVE_API');
     final uploadResp = await http.patch(
       uploadUri,
       headers: {...headers, 'Content-Type': 'application/json; charset=UTF-8'},
       body: utf8.encode(jsonPayload),
     );
+    AppLogger.instance.log('Upload response [${uploadResp.statusCode}]: ${uploadResp.body}', tag: 'DRIVE_API');
     if (uploadResp.statusCode != 200) {
       throw Exception('Drive upload failed (${uploadResp.statusCode}): ${uploadResp.body}');
     }
@@ -744,7 +1156,9 @@ class _BooksScreenState extends State<BooksScreen> {
     if (fileId == null || fileId.isEmpty) return null;
 
     final downloadUri = Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId?alt=media');
+    AppLogger.instance.log('Downloading backup content via GET $downloadUri', tag: 'DRIVE_API');
     final resp = await http.get(downloadUri, headers: headers);
+    AppLogger.instance.log('Download response status: ${resp.statusCode} (${resp.bodyBytes.length} bytes)', tag: 'DRIVE_API');
     if (resp.statusCode != 200) {
       throw Exception('Drive download failed (${resp.statusCode}): ${resp.body}');
     }
@@ -753,6 +1167,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _onSwitchDriveAccount(ThemeProvider prefs) async {
     HapticFeedback.lightImpact();
+    AppLogger.instance.log('User tapped Connect / Switch Google Account button.', tag: 'UI_ACTION');
     final user = await _signInForDrive(prefs, switchAccount: true);
     if (user == null || !mounted) return;
 
@@ -779,7 +1194,8 @@ class _BooksScreenState extends State<BooksScreen> {
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connected to ${user.email}')));
       }
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.log('Switch account Drive check error: $e\n$st', tag: 'ERROR');
       if (mounted) Navigator.pop(context);
       if (mounted) _showErrorModal('Google Drive Connection Error', e.toString());
     }
@@ -787,6 +1203,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _onBackupNow(ThemeProvider prefs) async {
     HapticFeedback.mediumImpact();
+    AppLogger.instance.log('User tapped Backup Now button.', tag: 'UI_ACTION');
     final user = await _signInForDrive(prefs);
     if (user == null || !mounted) return;
 
@@ -811,7 +1228,8 @@ class _BooksScreenState extends State<BooksScreen> {
           );
         }
       }
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.log('Backup Now failed: $e\n$st', tag: 'ERROR');
       if (mounted) Navigator.pop(context);
       if (mounted) _showErrorModal('Google Drive Backup Failed', e.toString());
     }
@@ -819,6 +1237,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _onRestoreNow(ThemeProvider prefs) async {
     HapticFeedback.mediumImpact();
+    AppLogger.instance.log('User tapped Restore button.', tag: 'UI_ACTION');
     final user = await _signInForDrive(prefs);
     if (user == null || !mounted) return;
 
@@ -828,7 +1247,8 @@ class _BooksScreenState extends State<BooksScreen> {
       final headers = await user.authHeaders;
       rawJson = await _pullBackupFromDrive(headers);
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (e, st) {
+      AppLogger.instance.log('Restore failed: $e\n$st', tag: 'ERROR');
       if (mounted) Navigator.pop(context);
       if (mounted) _showErrorModal('Google Drive Restore Error', e.toString());
       return;
@@ -1492,7 +1912,6 @@ class _BooksScreenState extends State<BooksScreen> {
               },
             ),
             const Divider(height: 1),
-                        const Divider(height: 1),
             ListTile(
               dense: true,
               leading: Icon(Icons.alternate_email_rounded, color: scheme.primary, size: 20),
@@ -1509,7 +1928,7 @@ class _BooksScreenState extends State<BooksScreen> {
               dense: true,
               leading: Icon(Icons.bug_report_rounded, color: scheme.primary, size: 20),
               title: const Text('Diagnostic Logs', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-              subtitle: const Text('View and export backend error traces', style: TextStyle(fontSize: 11.5)),
+              subtitle: const Text('View, clear, or save backend logs to Downloads', style: TextStyle(fontSize: 11.5)),
               trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
               onTap: () {
                 HapticFeedback.lightImpact();
@@ -1520,8 +1939,6 @@ class _BooksScreenState extends State<BooksScreen> {
         ],
       ),
     );
-  }
-
   }
 
   @override
