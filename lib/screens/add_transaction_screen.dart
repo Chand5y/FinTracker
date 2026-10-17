@@ -32,9 +32,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? _selectedCategory;
   late String _paymentMode;
   String _imagePath = '';
+  String _smsText = '';
 
   late TextEditingController _amountController;
   late TextEditingController _nameController;
+
+  List<Map<String, dynamic>> _otherBooks = [];
+  final Set<int> _selectedExtraBookIds = <int>{};
 
   @override
   void initState() {
@@ -51,6 +55,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       _paymentMode = 'Cash';
     }
     _imagePath = widget.existingTransaction?.imagePath ?? '';
+    _smsText = widget.existingTransaction?.effectiveSmsText ?? '';
+    _loadOtherBooks();
+  }
+
+  Future<void> _loadOtherBooks() async {
+    try {
+      final allBooks = await DatabaseHelper.instance.getBooksWithBalances();
+      final filtered = allBooks.where((b) => (b['id'] as int) != widget.bookId).toList();
+      if (mounted) {
+        setState(() => _otherBooks = filtered);
+      }
+    } catch (_) {}
   }
 
   String _getEmojiForCategory(String? catName) {
@@ -336,7 +352,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       amount: parsedAmount,
       name: _nameController.text.trim().isEmpty ? 'Untitled Entry' : _nameController.text.trim(),
       category: _selectedCategory ?? '',
-      notes: widget.existingTransaction?.notes ?? '',
+      notes: _smsText,
+      smsBody: _smsText,
       date: widget.existingTransaction?.date ?? DateTime.now(),
       currency: AppConstants.defaultCurrency,
       paymentMode: _paymentMode,
@@ -344,9 +361,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
 
     if (isNewInsert) {
-      await DatabaseHelper.instance.insertTransaction(transaction);
+      final targetBooks = <int>[widget.bookId, ..._selectedExtraBookIds];
+      await DatabaseHelper.instance.insertTransactionToMultipleBooks(transaction, targetBooks);
     } else {
       await DatabaseHelper.instance.updateTransaction(transaction);
+      if (_selectedExtraBookIds.isNotEmpty) {
+        await DatabaseHelper.instance.copyTransactionToBooks(transaction, _selectedExtraBookIds.toList());
+      }
     }
 
     if (mounted) Navigator.pop(context, true);
@@ -408,6 +429,141 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
+  Widget _buildPermanentSmsCard(bool isDark) {
+    final scheme = Theme.of(context).colorScheme;
+    final txDate = widget.existingTransaction?.date;
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? AppConstants.cardDark : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: scheme.primary.withOpacity(isDark ? 0.35 : 0.28),
+          width: 1.1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: scheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.sms_rounded, size: 16, color: scheme.primary),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Transaction SMS Record',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: scheme.primary,
+                  letterSpacing: 0.2,
+                ),
+              ),
+              const Spacer(),
+              if (txDate != null)
+                Text(
+                  AppConstants.formatOrdinalDateTime(txDate),
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SelectableText(
+            _smsText,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.45,
+              color: isDark ? Colors.grey[300] : Colors.grey[800],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMultiBookSelectorCard(bool isDark) {
+    if (_otherBooks.isEmpty) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final isEditing = widget.existingTransaction != null && widget.existingTransaction?.id != null;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.library_add_check_rounded, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isEditing ? 'Also Copy Entry to Other Books' : 'Also Add to Other Books (Optional)',
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Tap to save this same entry into additional books at once:',
+            style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _otherBooks.map((book) {
+              final int id = book['id'] as int;
+              final String name = book['name'].toString();
+              final bool isLending = (book['bookType']?.toString() ?? 'standard') == 'lending';
+              final bool selected = _selectedExtraBookIds.contains(id);
+
+              return FilterChip(
+                selected: selected,
+                showCheckmark: true,
+                avatar: Icon(
+                  isLending ? Icons.handshake_rounded : Icons.book_rounded,
+                  size: 15,
+                  color: selected ? scheme.primary : Colors.grey[500],
+                ),
+                label: Text(
+                  name,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+                onSelected: (val) {
+                  HapticFeedback.selectionClick();
+                  setState(() {
+                    if (val) {
+                      _selectedExtraBookIds.add(id);
+                    } else {
+                      _selectedExtraBookIds.remove(id);
+                    }
+                  });
+                },
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -423,30 +579,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            if (widget.isSmsDraft && (widget.existingTransaction?.notes.isNotEmpty ?? false)) ...[
-              Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDark ? AppConstants.cardDark : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.sms_outlined, size: 18, color: Theme.of(context).colorScheme.primary),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        widget.existingTransaction!.notes,
-                        style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[700]),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
             TextFormField(
               controller: _amountController,
               autofocus: widget.existingTransaction == null,
@@ -491,6 +623,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               emoji: AppConstants.paymentModeEmojis[_paymentMode] ?? '💳',
               onTap: () => _openPaymentModePicker(isDark),
             ),
+            if (_smsText.isNotEmpty) _buildPermanentSmsCard(isDark),
+            _buildMultiBookSelectorCard(isDark),
             const SizedBox(height: 16),
             Material(
               color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
@@ -521,7 +655,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             ),
             if (_imagePath.isNotEmpty) ...[
               const SizedBox(height: 12),
-              // Framed container with distinct border & inner mat so white screenshots never blend into the background
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
@@ -589,7 +722,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
               onPressed: _saveTransaction,
-              child: const Text('Save Entry', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+              child: Text(
+                _selectedExtraBookIds.isEmpty
+                    ? 'Save Entry'
+                    : 'Save in ${1 + _selectedExtraBookIds.length} Books',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ),
