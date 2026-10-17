@@ -80,7 +80,7 @@ class AppLogger {
       if (await mapsFile.exists()) {
         final lines = await mapsFile.readAsLines();
         final apkLine = lines.firstWhere(
-          (l) => l.contains('base.apk'),
+          (l) => l.contains('com.chandsy.fintrax') && l.contains('base.apk'),
           orElse: () => '',
         );
         if (apkLine.isNotEmpty) {
@@ -112,11 +112,11 @@ class AppLogger {
   static String explainPlayServicesCode(String rawMessage, String code) {
     final combined = '$code $rawMessage';
     if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
-      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the (Package Name + SHA-1) pair. '
+      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the (Package Name + SHA-1 + serverClientId) configuration. '
           'Causes: (1) The Android OAuth Client in Google Cloud Console does not match package "com.chandsy.fintrax" '
           'or SHA-1 "80:B1:E8:41:F5:67:D8:0D:3A:61:06:3D:6A:75:CB:96:B7:A3:28:45", '
           '(2) A duplicate OAuth client with the same SHA-1 exists in ANOTHER Google Cloud/Firebase project, or '
-          '(3) OAuth Consent Screen is missing a User Support Email / Developer Email.';
+          '(3) OAuth Consent Screen is in Testing mode without your email added under Test Users.';
     }
     if (combined.contains('12500:')) {
       return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete '
@@ -144,7 +144,6 @@ class AppLogger {
     final fullText = dumpAllText();
     final bytes = Uint8List.fromList(utf8.encode(fullText));
 
-    // Attempt 1: Direct write to /storage/emulated/0/Download
     try {
       final downloadDir = Directory('/storage/emulated/0/Download');
       if (await downloadDir.exists()) {
@@ -157,7 +156,6 @@ class AppLogger {
       log('Direct /Download write blocked by Android Scoped Storage ($e). Falling back to system file saver...', tag: 'EXPORT');
     }
 
-    // Attempt 2: Use Native Android SAF Document Creator (saves directly into Downloads without permissions)
     try {
       final saved = await _nativeChannel.invokeMethod<bool>('savePdfToDownloads', {
             'bytes': bytes,
@@ -327,6 +325,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   final GoogleSignIn _googleAuth = GoogleSignIn(
     scopes: <String>[_driveAppDataScope],
+    serverClientId: '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com',
   );
 
   int _tabIndex = 0;
