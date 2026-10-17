@@ -275,74 +275,80 @@ jobs:
 
               companion object {
                   fun scheduleNext(context: Context, hour: Int, minute: Int) {
-                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                      val intent = Intent(context, ReminderReceiver::class.java).apply {
-                          putExtra("kind", "daily")
-                          putExtra("hour", hour)
-                          putExtra("minute", minute)
-                      }
-                      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                      } else {
-                          PendingIntent.FLAG_UPDATE_CURRENT
-                      }
-                      val pi = PendingIntent.getBroadcast(context, 4001, intent, flags)
-                      val cal = Calendar.getInstance().apply {
-                          set(Calendar.HOUR_OF_DAY, hour)
-                          set(Calendar.MINUTE, minute)
-                          set(Calendar.SECOND, 0)
-                          set(Calendar.MILLISECOND, 0)
-                          if (timeInMillis <= System.currentTimeMillis()) {
-                              add(Calendar.DAY_OF_YEAR, 1)
+                      try {
+                          val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                          val intent = Intent(context, ReminderReceiver::class.java).apply {
+                              putExtra("kind", "daily")
+                              putExtra("hour", hour)
+                              putExtra("minute", minute)
                           }
-                      }
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
-                      } else {
-                          am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
-                      }
-                      scheduleMonthlyInsight(context)
+                          val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                          } else {
+                              PendingIntent.FLAG_UPDATE_CURRENT
+                          }
+                          val pi = PendingIntent.getBroadcast(context, 4001, intent, flags)
+                          val cal = Calendar.getInstance().apply {
+                              set(Calendar.HOUR_OF_DAY, hour)
+                              set(Calendar.MINUTE, minute)
+                              set(Calendar.SECOND, 0)
+                              set(Calendar.MILLISECOND, 0)
+                              if (timeInMillis <= System.currentTimeMillis()) {
+                                  add(Calendar.DAY_OF_YEAR, 1)
+                              }
+                          }
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                              am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                          } else {
+                              am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                          }
+                          scheduleMonthlyInsight(context)
+                      } catch (_: Exception) {}
                   }
 
                   fun scheduleMonthlyInsight(context: Context) {
-                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                      val intent = Intent(context, ReminderReceiver::class.java).apply {
-                          putExtra("kind", "monthly_insight")
-                      }
-                      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                      } else {
-                          PendingIntent.FLAG_UPDATE_CURRENT
-                      }
-                      val pi = PendingIntent.getBroadcast(context, 4002, intent, flags)
-                      val cal = Calendar.getInstance().apply {
-                          set(Calendar.DAY_OF_MONTH, 1)
-                          set(Calendar.HOUR_OF_DAY, 9)
-                          set(Calendar.MINUTE, 0)
-                          set(Calendar.SECOND, 0)
-                          set(Calendar.MILLISECOND, 0)
-                          if (timeInMillis <= System.currentTimeMillis()) {
-                              add(Calendar.MONTH, 1)
-                              set(Calendar.DAY_OF_MONTH, 1)
+                      try {
+                          val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                          val intent = Intent(context, ReminderReceiver::class.java).apply {
+                              putExtra("kind", "monthly_insight")
                           }
-                      }
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
-                      } else {
-                          am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
-                      }
+                          val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                          } else {
+                              PendingIntent.FLAG_UPDATE_CURRENT
+                          }
+                          val pi = PendingIntent.getBroadcast(context, 4002, intent, flags)
+                          val cal = Calendar.getInstance().apply {
+                              set(Calendar.DAY_OF_MONTH, 1)
+                              set(Calendar.HOUR_OF_DAY, 9)
+                              set(Calendar.MINUTE, 0)
+                              set(Calendar.SECOND, 0)
+                              set(Calendar.MILLISECOND, 0)
+                              if (timeInMillis <= System.currentTimeMillis()) {
+                                  add(Calendar.MONTH, 1)
+                                  set(Calendar.DAY_OF_MONTH, 1)
+                              }
+                          }
+                          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                              am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                          } else {
+                              am.set(AlarmManager.RTC_WAKEUP, cal.timeInMillis, pi)
+                          }
+                      } catch (_: Exception) {}
                   }
 
                   fun cancel(context: Context) {
-                      val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-                      val intent = Intent(context, ReminderReceiver::class.java)
-                      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                      } else {
-                          PendingIntent.FLAG_UPDATE_CURRENT
-                      }
-                      val pi = PendingIntent.getBroadcast(context, 4001, intent, flags)
-                      am.cancel(pi)
+                      try {
+                          val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                          val intent = Intent(context, ReminderReceiver::class.java)
+                          val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                              PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                          } else {
+                              PendingIntent.FLAG_UPDATE_CURRENT
+                          }
+                          val pi = PendingIntent.getBroadcast(context, 4001, intent, flags)
+                          am.cancel(pi)
+                      } catch (_: Exception) {}
                   }
               }
           }
@@ -365,30 +371,21 @@ jobs:
 
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "com.chandankumar.fintrack/sms"
-              private var pendingResult: MethodChannel.Result? = null
+              private var pendingSmsResult: MethodChannel.Result? = null
+              private var pendingNotifResult: MethodChannel.Result? = null
+              private var pendingAuthResult: MethodChannel.Result? = null
+              private var pendingPdfResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
               private var pendingInsightOpen: Boolean = false
-
-              override fun onCreate(savedInstanceState: android.os.Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  if (intent?.getBooleanExtra("open_monthly_insights", false) == true) {
-                      pendingInsightOpen = true
-                  }
-              }
-
-              override fun onNewIntent(intent: Intent) {
-                  super.onNewIntent(intent)
-                  if (intent.getBooleanExtra("open_monthly_insights", false)) {
-                      pendingInsightOpen = true
-                  }
-              }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
                       when (call.method) {
                           "consumeMonthlyInsightIntent" -> {
-                              val flag = pendingInsightOpen
+                              val fromLaunch = intent?.getBooleanExtra("open_monthly_insights", false) == true
+                              intent?.removeExtra("open_monthly_insights")
+                              val flag = pendingInsightOpen || fromLaunch
                               pendingInsightOpen = false
                               result.success(flag)
                           }
@@ -397,7 +394,7 @@ jobs:
                                   if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) {
                                       result.success(true)
                                   } else {
-                                      pendingResult = result
+                                      pendingNotifResult = result
                                       requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1007)
                                   }
                               } else {
@@ -409,7 +406,7 @@ jobs:
                                   if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
                                       result.success(true)
                                   } else {
-                                      pendingResult = result
+                                      pendingSmsResult = result
                                       requestPermissions(arrayOf(Manifest.permission.READ_SMS), 1001)
                                   }
                               } else {
@@ -467,7 +464,7 @@ jobs:
                                   @Suppress("DEPRECATION")
                                   val intent = km.createConfirmDeviceCredentialIntent("Unlock FinTrax", "Use your fingerprint or phone screen lock")
                                   if (intent != null) {
-                                      pendingResult = result
+                                      pendingAuthResult = result
                                       startActivityForResult(intent, 1002)
                                   } else {
                                       result.success(false)
@@ -484,7 +481,7 @@ jobs:
                                   return@setMethodCallHandler
                               }
                               pendingPdfBytes = bytes
-                              pendingResult = result
+                              pendingPdfResult = result
                               val mimeType = if (fileName.endsWith(".txt", ignoreCase = true)) "text/plain" else "application/pdf"
                               val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                                   addCategory(Intent.CATEGORY_OPENABLE)
@@ -498,10 +495,6 @@ jobs:
                               val hour = call.argument<Int>("hour") ?: 21
                               val minute = call.argument<Int>("minute") ?: 0
                               if (enabled) {
-                                  if (Build.VERSION.SDK_INT >= 33 &&
-                                      checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
-                                      requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1007)
-                                  }
                                   ReminderReceiver.scheduleNext(this, hour, minute)
                               } else {
                                   ReminderReceiver.cancel(this)
@@ -523,12 +516,22 @@ jobs:
                   }
               }
 
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  if (intent.getBooleanExtra("open_monthly_insights", false)) {
+                      pendingInsightOpen = true
+                  }
+              }
+
               override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
                   super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-                  if (requestCode == 1001 || requestCode == 1007) {
-                      val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-                      pendingResult?.success(granted)
-                      pendingResult = null
+                  val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                  if (requestCode == 1001) {
+                      pendingSmsResult?.success(granted)
+                      pendingSmsResult = null
+                  } else if (requestCode == 1007) {
+                      pendingNotifResult?.success(granted)
+                      pendingNotifResult = null
                   }
               }
 
@@ -536,8 +539,8 @@ jobs:
                   super.onActivityResult(requestCode, resultCode, data)
                   when (requestCode) {
                       1002 -> {
-                          pendingResult?.success(resultCode == Activity.RESULT_OK)
-                          pendingResult = null
+                          pendingAuthResult?.success(resultCode == Activity.RESULT_OK)
+                          pendingAuthResult = null
                       }
                       1006 -> {
                           if (resultCode == Activity.RESULT_OK && data?.data != null && pendingPdfBytes != null) {
@@ -545,15 +548,15 @@ jobs:
                                   contentResolver.openOutputStream(data.data!!)?.use { out ->
                                       out.write(pendingPdfBytes!!)
                                   }
-                                  pendingResult?.success(true)
+                                  pendingPdfResult?.success(true)
                               } catch (e: Exception) {
-                                  pendingResult?.success(false)
+                                  pendingPdfResult?.success(false)
                               }
                           } else {
-                              pendingResult?.success(false)
+                              pendingPdfResult?.success(false)
                           }
                           pendingPdfBytes = null
-                          pendingResult = null
+                          pendingPdfResult = null
                       }
                   }
               }
