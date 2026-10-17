@@ -75,68 +75,26 @@ class AppLogger {
       log('Could not read /proc/self/cmdline: $e', tag: 'ENV');
     }
 
-    try {
-      final mapsFile = File('/proc/self/maps');
-      if (await mapsFile.exists()) {
-        final lines = await mapsFile.readAsLines();
-        final apkLine = lines.firstWhere(
-          (l) => l.contains('com.chandsy.fintrax') && l.contains('base.apk'),
-          orElse: () => '',
-        );
-        if (apkLine.isNotEmpty) {
-          final idx = apkLine.indexOf('/');
-          final apkPath = idx >= 0 ? apkLine.substring(idx).trim() : apkLine;
-          log('Installed APK Path: $apkPath', tag: 'ENV');
-          final apkFile = File(apkPath);
-          if (await apkFile.exists()) {
-            final len = await apkFile.length();
-            log('Installed APK Size: $len bytes', tag: 'ENV');
-          }
-        }
-      }
-    } catch (e) {
-      log('Could not inspect APK path: $e', tag: 'ENV');
-    }
-
     log('GoogleSignIn Configured Scopes: ${googleAuth.scopes.join(", ")}', tag: 'OAUTH_CFG');
-    log('GoogleSignIn SignInOption: ${googleAuth.signInOption}', tag: 'OAUTH_CFG');
-    log('GoogleSignIn clientId (override): ${googleAuth.clientId ?? "null (using Android package + SHA-1)"}', tag: 'OAUTH_CFG');
-    log('GoogleSignIn serverClientId: ${googleAuth.serverClientId ?? "null (none)"}', tag: 'OAUTH_CFG');
-    log('GoogleSignIn forceCodeForRefreshToken: ${googleAuth.forceCodeForRefreshToken}', tag: 'OAUTH_CFG');
+    log('GoogleSignIn serverClientId: ${googleAuth.serverClientId ?? "null (direct Android client)"}', tag: 'OAUTH_CFG');
     log('Saved Drive Account in Prefs: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
-    log('Last Backup Timestamp in Prefs: "${prefs.lastBackupIso.isEmpty ? "NONE" : prefs.lastBackupIso}"', tag: 'PREFS');
-    log('Last Auto-Backup Day in Prefs: "${prefs.lastAutoBackupDay.isEmpty ? "NONE" : prefs.lastAutoBackupDay}"', tag: 'PREFS');
     log('--- Runtime Environment Check Complete ---', tag: 'ENV');
   }
 
   static String explainPlayServicesCode(String rawMessage, String code) {
     final combined = '$code $rawMessage';
     if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
-      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the (Package Name + SHA-1 + serverClientId) configuration. '
-          'Causes: (1) The Android OAuth Client in Google Cloud Console does not match package "com.chandsy.fintrax" '
-          'or SHA-1 "80:B1:E8:41:F5:67:D8:0D:3A:61:06:3D:6A:75:CB:96:B7:A3:28:45", '
-          '(2) A duplicate OAuth client with the same SHA-1 exists in ANOTHER Google Cloud/Firebase project, or '
-          '(3) OAuth Consent Screen is in Testing mode without your email added under Test Users.';
+      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the OAuth handshake. '
+          ' Note: Changes in Google Cloud Console (like removing the App Logo or updating OAuth clients) '
+          'can take 5 to 30 minutes to propagate across Google servers.';
     }
     if (combined.contains('12500:')) {
-      return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete '
-          '(missing Support Email, App Name, or Developer Contact Email), or the email being used is not added '
-          'under "Test Users" while the OAuth Consent Screen is in "Testing" mode.';
+      return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete.';
     }
     if (combined.contains('12501:')) {
-      return 'CODE 12501 (SIGN_IN_CANCELLED): The account picker was closed or cancelled before completion, '
-          'or blocked by an unverified consent screen.';
+      return 'CODE 12501 (SIGN_IN_CANCELLED): The account picker was closed or cancelled before completion.';
     }
-    if (combined.contains('12502:')) {
-      return 'CODE 12502 (SIGN_IN_CURRENTLY_IN_PROGRESS): Another sign-in request is already active.';
-    }
-    if (combined.contains('7:')) {
-      return 'CODE 7 (NETWORK_ERROR): Network connection failed while contacting Google Play Services.';
-    }
-    if (combined.contains('8:')) {
-      return 'CODE 8 (INTERNAL_ERROR): Internal Google Play Services error. Retrying or clearing Play Services cache may help.';
-    }
-    return 'Unmapped PlatformException ($code): $rawMessage';
+    return 'PlatformException ($code): $rawMessage';
   }
 
   Future<String?> saveLogsToDownloads() async {
@@ -153,7 +111,7 @@ class AppLogger {
         return outFile.path;
       }
     } catch (e) {
-      log('Direct /Download write blocked by Android Scoped Storage ($e). Falling back to system file saver...', tag: 'EXPORT');
+      log('Direct /Download write blocked ($e). Falling back to system file saver...', tag: 'EXPORT');
     }
 
     try {
@@ -311,6 +269,9 @@ class DebugLogsScreen extends StatelessWidget {
   }
 }
 
+// ===========================================================================
+// BOOKS & HOME SCREEN
+// ===========================================================================
 class BooksScreen extends StatefulWidget {
   const BooksScreen({Key? key}) : super(key: key);
 
@@ -322,11 +283,17 @@ class _BooksScreenState extends State<BooksScreen> {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   static const String _driveAppDataScope = 'https://www.googleapis.com/auth/drive.appdata';
   static const String _backupFileName = 'fintrax_cloud_backup.json';
+  static const String _webServerClientId = '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com';
 
+  // Primary client (Direct Android OAuth client without serverAuthCode overhead)
   final GoogleSignIn _googleAuth = GoogleSignIn(
     scopes: <String>[_driveAppDataScope],
-    serverClientId: '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com',
   );
+
+  static const List<String> _monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
 
   int _tabIndex = 0;
   List<Map<String, dynamic>> _books = [];
@@ -364,20 +331,49 @@ class _BooksScreenState extends State<BooksScreen> {
         'hour': prefs.reminderHour,
         'minute': prefs.reminderMinute,
       });
-      AppLogger.instance.log(
-        'Scheduled daily reminder (enabled=${prefs.dailyReminderEnabled}, time=${prefs.reminderHour}:${prefs.reminderMinute})',
-        tag: 'INIT',
-      );
     } catch (e) {
       AppLogger.instance.log('scheduleDailyReminder error: $e', tag: 'WARN');
     }
 
+    await _checkAndShowFirstOfMonthInsights();
     await _runSilentDailyBackup();
 
     final now = DateTime.now();
     final nextRun = DateTime(now.year, now.month, now.day + 1, 0, 5);
     _autoBackupTimer?.cancel();
     _autoBackupTimer = Timer(nextRun.difference(now), _runSilentDailyBackup);
+  }
+
+  Future<void> _checkAndShowFirstOfMonthInsights() async {
+    try {
+      bool launchedFromInsightNotif = false;
+      try {
+        launchedFromInsightNotif = await _nativeBridge.invokeMethod<bool>('consumeMonthlyInsightIntent') ?? false;
+      } catch (_) {}
+
+      final now = DateTime.now();
+      final markerKey = '__monthly_insight_shown_${now.year}_${now.month}__';
+      final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
+
+      if (launchedFromInsightNotif) {
+        await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
+        if (mounted) _openMonthlyInsightsSheet(initialPreviousMonth: true);
+        return;
+      }
+
+      // Auto-show on the 1st of the month the first time the user opens the app
+      if (now.day == 1 && !handledSet.contains(markerKey)) {
+        final prevMonthDate = DateTime(now.year, now.month - 1, 1);
+        final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
+        final int txCount = (insights['txCount'] as int?) ?? 0;
+        await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
+        if (txCount > 0 && mounted) {
+          _openMonthlyInsightsSheet(initialPreviousMonth: true);
+        }
+      }
+    } catch (e) {
+      AppLogger.instance.log('Monthly insight check error: $e', tag: 'WARN');
+    }
   }
 
   String _todayStamp() {
@@ -387,30 +383,17 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _runSilentDailyBackup() async {
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
-    if (prefs.driveAccount.isEmpty) {
-      AppLogger.instance.log('Silent daily backup skipped: no connected driveAccount in prefs.', tag: 'AUTO_SYNC');
-      return;
-    }
+    if (prefs.driveAccount.isEmpty) return;
 
     final currentBooks = await DatabaseHelper.instance.getBooksWithBalances();
-    if (currentBooks.isEmpty) {
-      AppLogger.instance.log('Silent daily backup skipped: 0 local books.', tag: 'AUTO_SYNC');
-      return;
-    }
+    if (currentBooks.isEmpty) return;
 
     final today = _todayStamp();
-    if (prefs.lastAutoBackupDay == today) {
-      AppLogger.instance.log('Silent daily backup skipped: already backed up today ($today).', tag: 'AUTO_SYNC');
-      return;
-    }
+    if (prefs.lastAutoBackupDay == today) return;
 
     try {
-      AppLogger.instance.log('Starting silent daily backup for ${prefs.driveAccount}...', tag: 'AUTO_SYNC');
-      final account = await _googleAuth.signInSilently(suppressErrors: false);
-      if (account == null) {
-        AppLogger.instance.log('Silent daily backup: signInSilently returned null.', tag: 'WARN');
-        return;
-      }
+      final account = await _googleAuth.signInSilently();
+      if (account == null) return;
       final headers = await account.authHeaders;
       final payload = await DatabaseHelper.instance.exportDatabaseJson();
       final uploadedId = await _pushBackupToDrive(headers, payload);
@@ -419,11 +402,8 @@ class _BooksScreenState extends State<BooksScreen> {
           isoTimestamp: DateTime.now().toIso8601String(),
           dayKey: today,
         );
-        AppLogger.instance.log('Silent daily backup succeeded (fileId=$uploadedId).', tag: 'AUTO_SYNC');
       }
-    } catch (e, st) {
-      AppLogger.instance.log('Silent daily backup failed: $e\n$st', tag: 'ERROR');
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadBooks() async {
@@ -488,101 +468,678 @@ class _BooksScreenState extends State<BooksScreen> {
     } catch (_) {}
   }
 
+  // ===========================================================================
+  // SMART CREATE BOOK DIALOG WITH SUGGESTIONS & LENDING MODE
+  // ===========================================================================
   Future<int?> _promptCreateBook() async {
     HapticFeedback.lightImpact();
     final ctrl = TextEditingController();
+    String selectedBookType = 'standard';
+    final currentMonthName = _monthNames[DateTime.now().month - 1];
+
+    final suggestions = <Map<String, String>>[
+      {'label': '$currentMonthName Expenses', 'type': 'standard', 'icon': '📅'},
+      {'label': 'Grocery Expenses', 'type': 'standard', 'icon': '🛒'},
+      {'label': 'Shopping Expenses', 'type': 'standard', 'icon': '🛍️'},
+      {'label': 'Personal Expenses', 'type': 'standard', 'icon': '👤'},
+      {'label': 'Money Lent (Udhaar)', 'type': 'lending', 'icon': '🤝'},
+      {'label': 'Home & Bills', 'type': 'standard', 'icon': '🏠'},
+      {'label': 'Travel & Trips', 'type': 'standard', 'icon': '✈️'},
+    ];
+
     return showDialog<int>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Create New Book', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(
-            hintText: 'e.g., Monthly Expenses',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              final title = ctrl.text.trim();
-              if (title.isEmpty) return;
-              final now = DateTime.now();
-              final id = await DatabaseHelper.instance.insertBook(
-                BookModel(name: title, createdAt: now, updatedAt: now),
-              );
-              if (id == -1) {
-                HapticFeedback.heavyImpact();
-                if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(
-                      content: Text('A book with this name already exists.'),
-                      backgroundColor: AppConstants.expenseRed,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          final scheme = Theme.of(ctx).colorScheme;
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            title: const Text('Create New Book', style: TextStyle(fontWeight: FontWeight.w800)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: InputDecoration(
+                      hintText: 'e.g., $currentMonthName Expenses',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'BOOK TYPE',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: Colors.grey[500]),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setDialogState(() => selectedBookType = 'standard');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                            decoration: BoxDecoration(
+                              color: selectedBookType == 'standard'
+                                  ? scheme.primary.withOpacity(isDark ? 0.22 : 0.12)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: selectedBookType == 'standard'
+                                    ? scheme.primary
+                                    : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                                width: selectedBookType == 'standard' ? 1.5 : 1.0,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.book_rounded, size: 16, color: selectedBookType == 'standard' ? scheme.primary : Colors.grey),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    'Expense Book',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: selectedBookType == 'standard' ? FontWeight.w800 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setDialogState(() => selectedBookType = 'lending');
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+                            decoration: BoxDecoration(
+                              color: selectedBookType == 'lending'
+                                  ? AppConstants.goldAccent.withOpacity(isDark ? 0.22 : 0.14)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: selectedBookType == 'lending'
+                                    ? AppConstants.goldAccent
+                                    : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                                width: selectedBookType == 'lending' ? 1.5 : 1.0,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.handshake_rounded,
+                                  size: 16,
+                                  color: selectedBookType == 'lending' ? AppConstants.goldAccent : Colors.grey,
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    'Lending / Udhaar',
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: selectedBookType == 'lending' ? FontWeight.w800 : FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'QUICK SUGGESTIONS',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: Colors.grey[500]),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: suggestions.map((s) {
+                      final String label = s['label']!;
+                      final String type = s['type']!;
+                      final String icon = s['icon']!;
+                      final bool isSelected = ctrl.text.trim().toLowerCase() == label.toLowerCase();
+
+                      return ActionChip(
+                        avatar: Text(icon, style: const TextStyle(fontSize: 13)),
+                        label: Text(
+                          label,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                          ),
+                        ),
+                        backgroundColor: isSelected
+                            ? scheme.primary.withOpacity(isDark ? 0.25 : 0.14)
+                            : (isDark ? const Color(0xFF1A1D26) : const Color(0xFFF1F5F9)),
+                        side: BorderSide(
+                          color: isSelected
+                              ? scheme.primary
+                              : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                        ),
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          setDialogState(() {
+                            ctrl.text = label;
+                            ctrl.selection = TextSelection.fromPosition(TextPosition(offset: ctrl.text.length));
+                            selectedBookType = type;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () async {
+                  final title = ctrl.text.trim();
+                  if (title.isEmpty) return;
+                  final now = DateTime.now();
+                  final id = await DatabaseHelper.instance.insertBook(
+                    BookModel(
+                      name: title,
+                      createdAt: now,
+                      updatedAt: now,
+                      bookType: selectedBookType,
                     ),
                   );
-                }
-              } else {
-                HapticFeedback.mediumImpact();
-                await _loadBooks();
-                if (ctx.mounted) Navigator.pop(ctx, id);
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
+                  if (id == -1) {
+                    HapticFeedback.heavyImpact();
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text('A book with this name already exists.'),
+                          backgroundColor: AppConstants.expenseRed,
+                        ),
+                      );
+                    }
+                  } else {
+                    HapticFeedback.mediumImpact();
+                    await _loadBooks();
+                    if (ctx.mounted) Navigator.pop(ctx, id);
+                  }
+                },
+                child: const Text('Create'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  void _promptRenameBook(int id, String oldName) {
+  void _promptRenameBook(int id, String oldName, String currentType) {
     final ctrl = TextEditingController(text: oldName);
+    String selectedType = currentType;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Rename Book', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.words,
-          decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () async {
-              final updated = ctrl.text.trim();
-              if (updated.isNotEmpty && updated != oldName) {
-                final res = await DatabaseHelper.instance.updateBookName(id, updated);
-                if (res == -1) {
-                  HapticFeedback.heavyImpact();
-                  if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(
-                        content: Text('A book with this name already exists.'),
-                        backgroundColor: AppConstants.expenseRed,
-                      ),
-                    );
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Rename / Edit Book', style: TextStyle(fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: const Text('Lending / Udhaar Ledger', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                subtitle: const Text('Mark this book for money lent/borrowed', style: TextStyle(fontSize: 11)),
+                value: selectedType == 'lending',
+                onChanged: (v) {
+                  HapticFeedback.selectionClick();
+                  setDialogState(() => selectedType = v ? 'lending' : 'standard');
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: () async {
+                final updated = ctrl.text.trim();
+                if (updated.isNotEmpty) {
+                  final res = await DatabaseHelper.instance.updateBookName(id, updated, bookType: selectedType);
+                  if (res == -1) {
+                    HapticFeedback.heavyImpact();
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text('A book with this name already exists.'),
+                          backgroundColor: AppConstants.expenseRed,
+                        ),
+                      );
+                    }
+                    return;
                   }
-                  return;
+                  HapticFeedback.mediumImpact();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  _loadBooks();
                 }
-                HapticFeedback.mediumImpact();
-                if (ctx.mounted) Navigator.pop(ctx);
-                _loadBooks();
-              }
-            },
-            child: const Text('Save'),
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // MONTHLY FINANCIAL INSIGHTS MODAL (1ST OF MONTH & ANYTIME VIEW)
+  // ===========================================================================
+  void _openMonthlyInsightsSheet({bool initialPreviousMonth = true}) {
+    HapticFeedback.lightImpact();
+    bool showPrevMonth = initialPreviousMonth;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          final scheme = Theme.of(ctx).colorScheme;
+          final now = DateTime.now();
+          final targetDate = showPrevMonth
+              ? DateTime(now.year, now.month - 1, 1)
+              : DateTime(now.year, now.month, 1);
+          final monthTitle = '${_monthNames[targetDate.month - 1]} ${targetDate.year}';
+
+          return Container(
+            margin: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.86),
+            decoration: BoxDecoration(
+              color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 42,
+                    height: 4,
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 14, 12, 8),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: scheme.primary.withOpacity(0.14),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(Icons.insights_rounded, color: scheme.primary, size: 22),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '$monthTitle Insights',
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                              ),
+                              Text(
+                                showPrevMonth ? 'Previous Month Financial Summary' : 'Current Month Live Summary',
+                                style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () => Navigator.pop(sheetCtx),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    child: SegmentedButton<bool>(
+                      showSelectedIcon: false,
+                      segments: [
+                        ButtonSegment(
+                          value: true,
+                          label: Text(
+                            'Last Month (${_monthNames[DateTime(now.year, now.month - 1, 1).month - 1]})',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                        ButtonSegment(
+                          value: false,
+                          label: Text(
+                            'This Month (${_monthNames[now.month - 1]})',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                      selected: {showPrevMonth},
+                      onSelectionChanged: (sel) {
+                        HapticFeedback.selectionClick();
+                        setSheetState(() => showPrevMonth = sel.first);
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Divider(height: 1),
+                  Flexible(
+                    child: FutureBuilder<Map<String, dynamic>>(
+                      future: DatabaseHelper.instance.getMonthlyInsights(targetDate.year, targetDate.month),
+                      builder: (ctx, snap) {
+                        if (!snap.hasData) {
+                          return const Padding(
+                            padding: EdgeInsets.all(40),
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        }
+                        final data = snap.data!;
+                        final double totalIn = (data['totalIncome'] as num?)?.toDouble() ?? 0.0;
+                        final double totalOut = (data['totalExpense'] as num?)?.toDouble() ?? 0.0;
+                        final double netFlow = (data['netFlow'] as num?)?.toDouble() ?? 0.0;
+                        final double shoppingSpend = (data['shoppingSpend'] as num?)?.toDouble() ?? 0.0;
+                        final double grocerySpend = (data['grocerySpend'] as num?)?.toDouble() ?? 0.0;
+                        final double foodSpend = (data['foodSpend'] as num?)?.toDouble() ?? 0.0;
+                        final double lendingGiven = (data['lendingGiven'] as num?)?.toDouble() ?? 0.0;
+                        final int txCount = (data['txCount'] as int?) ?? 0;
+                        final List<dynamic> cats = (data['categoryBreakdown'] as List<dynamic>?) ?? [];
+                        final List<dynamic> booksBreak = (data['bookBreakdown'] as List<dynamic>?) ?? [];
+
+                        if (txCount == 0 && lendingGiven == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.all(36),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.InsertChartOutlined, size: 48, color: Colors.grey[500]),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No entries logged for $monthTitle',
+                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Keep logging your daily expenses to unlock rich monthly insights!',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 12.5, color: Colors.grey[500]),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        return ListView(
+                          padding: const EdgeInsets.all(18),
+                          shrinkWrap: true,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _insightMetricCard(
+                                    isDark: isDark,
+                                    title: 'Total Income',
+                                    amount: totalIn,
+                                    color: AppConstants.incomeGreen,
+                                    prefix: '+',
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _insightMetricCard(
+                                    isDark: isDark,
+                                    title: 'Total Spent',
+                                    amount: totalOut,
+                                    color: AppConstants.expenseRed,
+                                    prefix: '-',
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF171A24) : const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Net Monthly Savings / Flow ($txCount entries)',
+                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.grey[500]),
+                                  ),
+                                  Text(
+                                    '${netFlow < 0 ? '-' : '+'}${AppConstants.defaultCurrency}${netFlow.abs().toStringAsFixed(0)}',
+                                    style: TextStyle(
+                                      fontSize: 15.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: netFlow < 0 ? AppConstants.expenseRed : AppConstants.incomeGreen,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'KEY SPENDING HIGHLIGHTS',
+                              style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: Colors.grey[500]),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _highlightPill(
+                                    isDark: isDark,
+                                    emoji: '🛍️',
+                                    label: 'Shopping',
+                                    amount: shoppingSpend,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: _highlightPill(
+                                    isDark: isDark,
+                                    emoji: '🛒',
+                                    label: 'Groceries',
+                                    amount: grocerySpend,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: _highlightPill(
+                                    isDark: isDark,
+                                    emoji: '🍽️',
+                                    label: 'Food & Dining',
+                                    amount: foodSpend,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (cats.isNotEmpty) ...[
+                              const SizedBox(height: 18),
+                              Text(
+                                'CATEGORY BREAKDOWN',
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: Colors.grey[500]),
+                              ),
+                              const SizedBox(height: 8),
+                              ...cats.take(6).map((c) {
+                                final String cName = c['name'].toString();
+                                final double cAmt = (c['amount'] as num).toDouble();
+                                final double pct = totalOut > 0 ? (cAmt / totalOut).clamp(0.0, 1.0) : 0.0;
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(cName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                          Text(
+                                            '${AppConstants.defaultCurrency}${cAmt.toStringAsFixed(0)} (${(pct * 100).toStringAsFixed(0)}%)',
+                                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 5),
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: LinearProgressIndicator(
+                                          value: pct,
+                                          minHeight: 6,
+                                          backgroundColor: isDark ? Colors.white10 : Colors.black12,
+                                          valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                            if (booksBreak.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                'SPENDING BY BOOK',
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: Colors.grey[500]),
+                              ),
+                              const SizedBox(height: 8),
+                              ...booksBreak.map((b) {
+                                final String bName = b['name'].toString();
+                                final double bAmt = (b['amount'] as num).toDouble();
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(Icons.book_outlined, size: 15, color: scheme.primary),
+                                          const SizedBox(width: 8),
+                                          Text(bName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                        ],
+                                      ),
+                                      Text(
+                                        '${AppConstants.defaultCurrency}${bAmt.toStringAsFixed(0)}',
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppConstants.expenseRed),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _insightMetricCard({
+    required bool isDark,
+    required String title,
+    required double amount,
+    required Color color,
+    required String prefix,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withOpacity(isDark ? 0.12 : 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: color)),
+          const SizedBox(height: 6),
+          Text(
+            '$prefix${AppConstants.defaultCurrency}${amount.toStringAsFixed(0)}',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color),
           ),
         ],
       ),
     );
   }
 
-  void _openBookMenu(int bookId, String bookName, int pinned) {
+  Widget _highlightPill({
+    required bool isDark,
+    required String emoji,
+    required String label,
+    required double amount,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF171A24) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+      ),
+      child: Column(
+        children: [
+          Text(emoji, style: const TextStyle(fontSize: 18)),
+          const SizedBox(height: 4),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(
+            '${AppConstants.defaultCurrency}${amount.toStringAsFixed(0)}',
+            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openBookMenu(int bookId, String bookName, int pinned, String bookType) {
     HapticFeedback.mediumImpact();
     showModalBottomSheet(
       context: context,
@@ -616,11 +1173,11 @@ class _BooksScreenState extends State<BooksScreen> {
               ),
               ListTile(
                 leading: const Icon(Icons.edit_outlined),
-                title: const Text('Rename Book'),
+                title: const Text('Rename / Change Book Type'),
                 onTap: () {
                   HapticFeedback.lightImpact();
                   Navigator.pop(ctx);
-                  _promptRenameBook(bookId, bookName);
+                  _promptRenameBook(bookId, bookName, bookType);
                 },
               ),
               ListTile(
@@ -853,7 +1410,13 @@ class _BooksScreenState extends State<BooksScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     children: [
-                      Icon(Icons.book_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
+                      Icon(
+                        (b['bookType']?.toString() ?? 'standard') == 'lending'
+                            ? Icons.handshake_rounded
+                            : Icons.book_rounded,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(child: Text(b['name'].toString(), style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600))),
                     ],
@@ -896,6 +1459,7 @@ class _BooksScreenState extends State<BooksScreen> {
         name: sms.merchant,
         category: '',
         notes: sms.body,
+        smsBody: sms.body,
         date: sms.date,
         currency: AppConstants.defaultCurrency,
         paymentMode: sms.paymentMode,
@@ -922,7 +1486,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // GOOGLE DRIVE CLOUD SYNC (v3 appDataFolder) WITH DEEP DIAGNOSTIC LOGGING
+  // GOOGLE DRIVE CLOUD SYNC WITH 3-STAGE AUTOMATIC FALLBACK
   // ===========================================================================
 
   void _showProgressModal(String label) {
@@ -973,116 +1537,97 @@ class _BooksScreenState extends State<BooksScreen> {
   Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
     final sw = Stopwatch()..start();
     AppLogger.instance.log('====================================================', tag: 'AUTH');
-    AppLogger.instance.log(
-      'Starting _signInForDrive(switchAccount=$switchAccount, savedEmail="${prefs.driveAccount}")',
-      tag: 'AUTH',
-    );
-    await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
+    AppLogger.instance.log('Starting 3-Stage _signInForDrive(switchAccount=$switchAccount)', tag: 'AUTH');
 
+    PlatformException? lastPlatformError;
+
+    // -------------------------------------------------------------------------
+    // STAGE 1: Direct Android OAuth Client (No serverClientId overhead)
+    // -------------------------------------------------------------------------
     try {
-      final alreadySignedIn = await _googleAuth.isSignedIn();
-      AppLogger.instance.log('Step 1 [${sw.elapsedMilliseconds}ms]: _googleAuth.isSignedIn() => $alreadySignedIn', tag: 'AUTH');
-
+      AppLogger.instance.log('Stage 1 [${sw.elapsedMilliseconds}ms]: Trying Direct Android Client...', tag: 'AUTH');
       if (switchAccount) {
-        AppLogger.instance.log('Step 2 [${sw.elapsedMilliseconds}ms]: Calling _googleAuth.signOut() for account switch...', tag: 'AUTH');
         await _googleAuth.signOut();
-        AppLogger.instance.log('Step 2b [${sw.elapsedMilliseconds}ms]: _googleAuth.signOut() completed.', tag: 'AUTH');
       }
-
       GoogleSignInAccount? user = _googleAuth.currentUser;
-      AppLogger.instance.log(
-        'Step 3 [${sw.elapsedMilliseconds}ms]: _googleAuth.currentUser => ${user != null ? "${user.email} (id=${user.id})" : "null"}',
-        tag: 'AUTH',
-      );
-
       if (user == null && !switchAccount) {
-        AppLogger.instance.log(
-          'Step 4 [${sw.elapsedMilliseconds}ms]: Attempting _googleAuth.signInSilently(suppressErrors: false)...',
-          tag: 'AUTH',
-        );
-        try {
-          user = await _googleAuth.signInSilently(suppressErrors: false);
-          AppLogger.instance.log(
-            'Step 4b [${sw.elapsedMilliseconds}ms]: signInSilently succeeded => ${user?.email ?? "null"}',
-            tag: 'AUTH',
-          );
-        } on PlatformException catch (silentEx) {
-          AppLogger.instance.log(
-            'Step 4b [${sw.elapsedMilliseconds}ms]: signInSilently threw PlatformException -> '
-            'code="${silentEx.code}", message="${silentEx.message}", details="${silentEx.details}"',
-            tag: 'WARN',
-          );
-          AppLogger.instance.log(
-            AppLogger.explainPlayServicesCode(silentEx.message ?? '', silentEx.code),
-            tag: 'DIAGNOSIS',
-          );
-        } catch (silentErr) {
-          AppLogger.instance.log('Step 4b [${sw.elapsedMilliseconds}ms]: signInSilently error: $silentErr', tag: 'WARN');
-        }
+        user = await _googleAuth.signInSilently();
       }
-
-      if (user == null) {
-        AppLogger.instance.log(
-          'Step 5 [${sw.elapsedMilliseconds}ms]: Launching interactive _googleAuth.signIn() picker...',
-          tag: 'AUTH',
-        );
-        user = await _googleAuth.signIn();
-        AppLogger.instance.log(
-          'Step 5b [${sw.elapsedMilliseconds}ms]: Interactive signIn() returned => '
-          '${user != null ? "email=${user.email}, id=${user.id}, displayName=${user.displayName}, serverAuthCode=${user.serverAuthCode}" : "null (user cancelled or dismissed picker)"}',
-          tag: 'AUTH',
-        );
-      }
-
-      if (user == null) {
-        AppLogger.instance.log('Sign-in flow ended: user is null.', tag: 'WARN');
+      user ??= await _googleAuth.signIn();
+      if (user != null) {
+        final headers = await user.authHeaders;
+        AppLogger.instance.log('Stage 1 SUCCESS for ${user.email} (headers: ${headers.keys.length})', tag: 'AUTH');
+        await prefs.setDriveAccount(user.email);
+        return user;
+      } else {
+        AppLogger.instance.log('Stage 1 returned null (cancelled).', tag: 'WARN');
         return null;
       }
+    } on PlatformException catch (e) {
+      lastPlatformError = e;
+      AppLogger.instance.log('Stage 1 PlatformException (${e.code}): ${e.message}', tag: 'WARN');
+    } catch (e) {
+      AppLogger.instance.log('Stage 1 error: $e', tag: 'WARN');
+    }
 
-      AppLogger.instance.log('Step 6 [${sw.elapsedMilliseconds}ms]: Inspecting GoogleSignInAuthentication tokens...', tag: 'AUTH');
-      final googleTokens = await user.authentication;
-      AppLogger.instance.log(
-        'Step 6b [${sw.elapsedMilliseconds}ms]: accessToken present=${googleTokens.accessToken != null && googleTokens.accessToken!.isNotEmpty} '
-        '(len=${googleTokens.accessToken?.length ?? 0}), '
-        'idToken present=${googleTokens.idToken != null && googleTokens.idToken!.isNotEmpty} '
-        '(len=${googleTokens.idToken?.length ?? 0})',
-        tag: 'AUTH',
-      );
+    // -------------------------------------------------------------------------
+    // STAGE 2: Basic Email Sign-In first -> then requestScopes([drive.appdata])
+    // -------------------------------------------------------------------------
+    try {
+      AppLogger.instance.log('Stage 2 [${sw.elapsedMilliseconds}ms]: Trying 2-Step Basic SignIn + requestScopes...', tag: 'AUTH');
+      final stepAuth = GoogleSignIn(scopes: <String>['email']);
+      if (switchAccount) await stepAuth.signOut();
+      final user = await stepAuth.signIn();
+      if (user != null) {
+        final granted = await stepAuth.requestScopes(<String>[_driveAppDataScope]);
+        AppLogger.instance.log('Stage 2 requestScopes granted=$granted', tag: 'AUTH');
+        final headers = await user.authHeaders;
+        AppLogger.instance.log('Stage 2 SUCCESS for ${user.email}', tag: 'AUTH');
+        await prefs.setDriveAccount(user.email);
+        return user;
+      }
+    } on PlatformException catch (e) {
+      lastPlatformError = e;
+      AppLogger.instance.log('Stage 2 PlatformException (${e.code}): ${e.message}', tag: 'WARN');
+    } catch (e) {
+      AppLogger.instance.log('Stage 2 error: $e', tag: 'WARN');
+    }
 
-      AppLogger.instance.log('Step 7 [${sw.elapsedMilliseconds}ms]: Requesting user.authHeaders...', tag: 'AUTH');
-      final headers = await user.authHeaders;
-      AppLogger.instance.log(
-        'Step 7b [${sw.elapsedMilliseconds}ms]: authHeaders received. Keys: ${headers.keys.toList()}',
-        tag: 'AUTH',
+    // -------------------------------------------------------------------------
+    // STAGE 3: Web serverClientId Fallback
+    // -------------------------------------------------------------------------
+    try {
+      AppLogger.instance.log('Stage 3 [${sw.elapsedMilliseconds}ms]: Trying Web serverClientId Fallback...', tag: 'AUTH');
+      final webAuth = GoogleSignIn(
+        scopes: <String>[_driveAppDataScope],
+        serverClientId: _webServerClientId,
       );
+      if (switchAccount) await webAuth.signOut();
+      final user = await webAuth.signIn();
+      if (user != null) {
+        final headers = await user.authHeaders;
+        AppLogger.instance.log('Stage 3 SUCCESS for ${user.email} (headers: ${headers.keys.length})', tag: 'AUTH');
+        await prefs.setDriveAccount(user.email);
+        return user;
+      }
+    } on PlatformException catch (e) {
+      lastPlatformError = e;
+      AppLogger.instance.log('Stage 3 PlatformException (${e.code}): ${e.message}', tag: 'ERROR');
+    } catch (e) {
+      AppLogger.instance.log('Stage 3 error: $e', tag: 'ERROR');
+    }
 
-      await prefs.setDriveAccount(user.email);
-      AppLogger.instance.log('Step 8 [${sw.elapsedMilliseconds}ms]: Sign-In complete for ${user.email}!', tag: 'AUTH');
-      return user;
-    } on PlatformException catch (e, stack) {
-      final diagnosis = AppLogger.explainPlayServicesCode(e.message ?? '', e.code);
-      AppLogger.instance.log(
-        'PLATFORM ERROR after ${sw.elapsedMilliseconds}ms:\n'
-        '  • Code: ${e.code}\n'
-        '  • Message: ${e.message}\n'
-        '  • Details: ${e.details} (type: ${e.details?.runtimeType})\n'
-        '  • StackTrace:\n$stack',
-        tag: 'ERROR',
-      );
+    if (lastPlatformError != null) {
+      final diagnosis = AppLogger.explainPlayServicesCode(lastPlatformError.message ?? '', lastPlatformError.code);
       AppLogger.instance.log(diagnosis, tag: 'DIAGNOSIS');
-
       if (mounted) {
         _showErrorModal(
-          'Google Sign-In Blocked (${e.code})',
-          'Google Play Services rejected the sign-in:\n${e.message ?? e.toString()}\n\n$diagnosis',
+          'Google Sign-In Blocked (${lastPlatformError.code})',
+          'Google Play Services rejected the sign-in:\n${lastPlatformError.message ?? lastPlatformError.toString()}\n\n$diagnosis',
         );
       }
-      return null;
-    } catch (e, stack) {
-      AppLogger.instance.log('UNEXPECTED SIGN-IN EXCEPTION after ${sw.elapsedMilliseconds}ms: $e\nStack:\n$stack', tag: 'ERROR');
-      if (mounted) _showErrorModal('Sign-In Error', e.toString());
-      return null;
     }
+    return null;
   }
 
   Future<String?> _locateBackupFileId(Map<String, String> headers) async {
@@ -1092,30 +1637,21 @@ class _BooksScreenState extends State<BooksScreen> {
       'fields': 'files(id,name,modifiedTime)',
       'pageSize': '1',
     });
-    AppLogger.instance.log('GET $uri', tag: 'DRIVE_API');
     final resp = await http.get(uri, headers: headers);
-    AppLogger.instance.log('Drive list response [${resp.statusCode}]: ${resp.body}', tag: 'DRIVE_API');
     if (resp.statusCode != 200) {
       throw Exception('Drive list failed (${resp.statusCode}): ${resp.body}');
     }
     final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
     final list = (decoded['files'] as List<dynamic>?) ?? [];
-    if (list.isEmpty) {
-      AppLogger.instance.log('No existing backup file found in appDataFolder.', tag: 'DRIVE_API');
-      return null;
-    }
-    final foundId = (list.first as Map<String, dynamic>)['id']?.toString();
-    AppLogger.instance.log('Located existing backup fileId: $foundId', tag: 'DRIVE_API');
-    return foundId;
+    if (list.isEmpty) return null;
+    return (list.first as Map<String, dynamic>)['id']?.toString();
   }
 
   Future<String?> _pushBackupToDrive(Map<String, String> headers, String jsonPayload) async {
-    AppLogger.instance.log('Preparing to push backup (${jsonPayload.length} chars)...', tag: 'DRIVE_API');
     String? fileId = await _locateBackupFileId(headers);
 
     if (fileId == null) {
       final createUri = Uri.parse('https://www.googleapis.com/drive/v3/files');
-      AppLogger.instance.log('Creating new file in appDataFolder via POST $createUri', tag: 'DRIVE_API');
       final createResp = await http.post(
         createUri,
         headers: {...headers, 'Content-Type': 'application/json; charset=UTF-8'},
@@ -1124,7 +1660,6 @@ class _BooksScreenState extends State<BooksScreen> {
           'parents': ['appDataFolder'],
         }),
       );
-      AppLogger.instance.log('Create file response [${createResp.statusCode}]: ${createResp.body}', tag: 'DRIVE_API');
       if (createResp.statusCode != 200 && createResp.statusCode != 201) {
         throw Exception('Drive create failed (${createResp.statusCode}): ${createResp.body}');
       }
@@ -1137,13 +1672,11 @@ class _BooksScreenState extends State<BooksScreen> {
     }
 
     final uploadUri = Uri.parse('https://www.googleapis.com/upload/drive/v3/files/$fileId?uploadType=media');
-    AppLogger.instance.log('Uploading payload via PATCH $uploadUri', tag: 'DRIVE_API');
     final uploadResp = await http.patch(
       uploadUri,
       headers: {...headers, 'Content-Type': 'application/json; charset=UTF-8'},
       body: utf8.encode(jsonPayload),
     );
-    AppLogger.instance.log('Upload response [${uploadResp.statusCode}]: ${uploadResp.body}', tag: 'DRIVE_API');
     if (uploadResp.statusCode != 200) {
       throw Exception('Drive upload failed (${uploadResp.statusCode}): ${uploadResp.body}');
     }
@@ -1155,9 +1688,7 @@ class _BooksScreenState extends State<BooksScreen> {
     if (fileId == null || fileId.isEmpty) return null;
 
     final downloadUri = Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId?alt=media');
-    AppLogger.instance.log('Downloading backup content via GET $downloadUri', tag: 'DRIVE_API');
     final resp = await http.get(downloadUri, headers: headers);
-    AppLogger.instance.log('Download response status: ${resp.statusCode} (${resp.bodyBytes.length} bytes)', tag: 'DRIVE_API');
     if (resp.statusCode != 200) {
       throw Exception('Drive download failed (${resp.statusCode}): ${resp.body}');
     }
@@ -1166,7 +1697,6 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _onSwitchDriveAccount(ThemeProvider prefs) async {
     HapticFeedback.lightImpact();
-    AppLogger.instance.log('User tapped Connect / Switch Google Account button.', tag: 'UI_ACTION');
     final user = await _signInForDrive(prefs, switchAccount: true);
     if (user == null || !mounted) return;
 
@@ -1193,8 +1723,7 @@ class _BooksScreenState extends State<BooksScreen> {
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connected to ${user.email}')));
       }
-    } catch (e, st) {
-      AppLogger.instance.log('Switch account Drive check error: $e\n$st', tag: 'ERROR');
+    } catch (e) {
       if (mounted) Navigator.pop(context);
       if (mounted) _showErrorModal('Google Drive Connection Error', e.toString());
     }
@@ -1202,7 +1731,6 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _onBackupNow(ThemeProvider prefs) async {
     HapticFeedback.mediumImpact();
-    AppLogger.instance.log('User tapped Backup Now button.', tag: 'UI_ACTION');
     final user = await _signInForDrive(prefs);
     if (user == null || !mounted) return;
 
@@ -1227,8 +1755,7 @@ class _BooksScreenState extends State<BooksScreen> {
           );
         }
       }
-    } catch (e, st) {
-      AppLogger.instance.log('Backup Now failed: $e\n$st', tag: 'ERROR');
+    } catch (e) {
       if (mounted) Navigator.pop(context);
       if (mounted) _showErrorModal('Google Drive Backup Failed', e.toString());
     }
@@ -1236,7 +1763,6 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _onRestoreNow(ThemeProvider prefs) async {
     HapticFeedback.mediumImpact();
-    AppLogger.instance.log('User tapped Restore button.', tag: 'UI_ACTION');
     final user = await _signInForDrive(prefs);
     if (user == null || !mounted) return;
 
@@ -1246,8 +1772,7 @@ class _BooksScreenState extends State<BooksScreen> {
       final headers = await user.authHeaders;
       rawJson = await _pullBackupFromDrive(headers);
       if (mounted) Navigator.pop(context);
-    } catch (e, st) {
-      AppLogger.instance.log('Restore failed: $e\n$st', tag: 'ERROR');
+    } catch (e) {
       if (mounted) Navigator.pop(context);
       if (mounted) _showErrorModal('Google Drive Restore Error', e.toString());
       return;
@@ -1405,6 +1930,11 @@ class _BooksScreenState extends State<BooksScreen> {
       appBar: AppBar(
         title: _buildHeaderLogo(isDark, dynamicColors),
         actions: [
+          IconButton(
+            tooltip: 'Monthly Financial Insights',
+            icon: const Icon(Icons.insights_rounded),
+            onPressed: () => _openMonthlyInsightsSheet(initialPreviousMonth: true),
+          ),
           PopupMenuButton<BookSort>(
             icon: const Icon(Icons.sort_rounded),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1467,7 +1997,7 @@ class _BooksScreenState extends State<BooksScreen> {
                             const SizedBox(height: 12),
                             Text('No books yet', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[500])),
                             const SizedBox(height: 4),
-                            Text('Tap "+ New Book" below to get started', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
+                            Text('Tap "+ New Book" below to see smart suggestions', style: TextStyle(fontSize: 13, color: Colors.grey[500])),
                           ],
                         ),
                       )
@@ -1477,15 +2007,19 @@ class _BooksScreenState extends State<BooksScreen> {
                         itemBuilder: (ctx, idx) {
                           final item = _books[idx];
                           final pinned = (item['isPinned'] ?? 0) == 1;
+                          final String bookType = item['bookType']?.toString() ?? 'standard';
+                          final bool isLending = bookType == 'lending';
                           final balance = ((item['totalIn'] ?? 0) as num).toDouble() - ((item['totalOut'] ?? 0) as num).toDouble();
                           final isNeg = balance < 0;
 
                           final bg = isDark
                               ? (pinned ? const Color(0xFF171A24) : AppConstants.cardDark)
                               : (pinned ? const Color(0xFFFAF6EE) : AppConstants.cardLight);
-                          final border = isDark
-                              ? (pinned ? accent.withOpacity(0.45) : AppConstants.borderDark)
-                              : (pinned ? accent.withOpacity(0.40) : AppConstants.borderLight);
+                          final border = isLending
+                              ? AppConstants.goldAccent.withOpacity(0.55)
+                              : (isDark
+                                  ? (pinned ? accent.withOpacity(0.45) : AppConstants.borderDark)
+                                  : (pinned ? accent.withOpacity(0.40) : AppConstants.borderLight));
 
                           final createdDate = DateTime.tryParse(item['createdAt']?.toString() ?? '') ?? DateTime.now();
                           final updatedDate = DateTime.tryParse(item['updatedAt']?.toString() ?? '') ?? DateTime.now();
@@ -1496,7 +2030,7 @@ class _BooksScreenState extends State<BooksScreen> {
                               color: bg,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(18),
-                                side: BorderSide(color: border, width: 1),
+                                side: BorderSide(color: border, width: isLending ? 1.2 : 1.0),
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: InkWell(
@@ -1506,11 +2040,20 @@ class _BooksScreenState extends State<BooksScreen> {
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (_) => DashboardScreen(bookId: item['id'] as int, bookName: item['name'].toString()),
+                                      builder: (_) => DashboardScreen(
+                                        bookId: item['id'] as int,
+                                        bookName: item['name'].toString(),
+                                        bookType: bookType,
+                                      ),
                                     ),
                                   ).then((_) => _loadBooks());
                                 },
-                                onLongPress: () => _openBookMenu(item['id'] as int, item['name'].toString(), (item['isPinned'] ?? 0) as int),
+                                onLongPress: () => _openBookMenu(
+                                  item['id'] as int,
+                                  item['name'].toString(),
+                                  (item['isPinned'] ?? 0) as int,
+                                  bookType,
+                                ),
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                   child: Row(
@@ -1518,15 +2061,21 @@ class _BooksScreenState extends State<BooksScreen> {
                                       Container(
                                         padding: const EdgeInsets.all(11),
                                         decoration: BoxDecoration(
-                                          color: dynamicColors
-                                              ? scheme.primary.withOpacity(0.12)
-                                              : (isDark ? AppConstants.iconNavy : const Color(0xFFF5EFE2)),
+                                          color: isLending
+                                              ? AppConstants.goldAccent.withOpacity(0.15)
+                                              : (dynamicColors
+                                                  ? scheme.primary.withOpacity(0.12)
+                                                  : (isDark ? AppConstants.iconNavy : const Color(0xFFF5EFE2))),
                                           borderRadius: BorderRadius.circular(12),
                                           border: Border.all(color: accent.withOpacity(0.35), width: 0.8),
                                         ),
                                         child: Icon(
-                                          pinned ? Icons.push_pin_rounded : Icons.book_rounded,
-                                          color: dynamicColors ? scheme.primary : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText),
+                                          isLending
+                                              ? Icons.handshake_rounded
+                                              : (pinned ? Icons.push_pin_rounded : Icons.book_rounded),
+                                          color: isLending
+                                              ? AppConstants.goldAccent
+                                              : (dynamicColors ? scheme.primary : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText)),
                                           size: 20,
                                         ),
                                       ),
@@ -1539,11 +2088,37 @@ class _BooksScreenState extends State<BooksScreen> {
                                             Row(
                                               children: [
                                                 Expanded(
-                                                  child: Text(
-                                                    item['name'].toString(),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                                  child: Row(
+                                                    children: [
+                                                      Flexible(
+                                                        child: Text(
+                                                          item['name'].toString(),
+                                                          maxLines: 1,
+                                                          overflow: TextOverflow.ellipsis,
+                                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                                        ),
+                                                      ),
+                                                      if (isLending) ...[
+                                                        const SizedBox(width: 6),
+                                                        Container(
+                                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                          decoration: BoxDecoration(
+                                                            color: AppConstants.goldAccent.withOpacity(0.18),
+                                                            borderRadius: BorderRadius.circular(5),
+                                                            border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 0.6),
+                                                          ),
+                                                          child: const Text(
+                                                            'LENDING',
+                                                            style: TextStyle(
+                                                              fontSize: 8,
+                                                              fontWeight: FontWeight.w800,
+                                                              color: AppConstants.goldAccent,
+                                                              letterSpacing: 0.6,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ],
                                                   ),
                                                 ),
                                                 const SizedBox(width: 8),
@@ -1756,7 +2331,7 @@ class _BooksScreenState extends State<BooksScreen> {
                         const Text('Daily Expense Reminder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
                         const SizedBox(height: 2),
                         Text(
-                          prefs.dailyReminderEnabled ? 'Includes daily SMS summary' : 'Reminders paused',
+                          prefs.dailyReminderEnabled ? '60 rotating witty reminders + SMS recap' : 'Reminders paused',
                           style: TextStyle(fontSize: 11.5, color: isDark ? Colors.grey[400] : Colors.grey[600]),
                         ),
                       ],
@@ -1796,6 +2371,15 @@ class _BooksScreenState extends State<BooksScreen> {
                   ),
                 ],
               ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.insights_rounded, color: scheme.primary, size: 21),
+              title: const Text('Monthly Expense Insights', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+              subtitle: const Text('View previous & current month spending breakdown', style: TextStyle(fontSize: 11.5)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+              onTap: () => _openMonthlyInsightsSheet(initialPreviousMonth: true),
             ),
           ]),
           _sectionLabel('GOOGLE DRIVE SYNC'),
