@@ -191,6 +191,37 @@ class DebugLogsScreen extends StatelessWidget {
 }
 
 // ===========================================================================
+// BRAND BADGE FOR ONBOARDING
+// ===========================================================================
+class _FinTraxBrandBadge extends StatelessWidget {
+  final double size;
+  const _FinTraxBrandBadge({this.size = 62});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      margin: const EdgeInsets.only(top: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(15),
+        child: Image.asset('logo.png', width: size, height: size, fit: BoxFit.cover),
+      ),
+    );
+  }
+}
+
+// ===========================================================================
 // FIRST-INSTALL WELCOME & FRIENDLY PERMISSION SETUP FLOW
 // ===========================================================================
 class WelcomeSetupScreen extends StatefulWidget {
@@ -449,27 +480,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                         ? Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Center(
-                                child: Container(
-                                  width: 62,
-                                  height: 62,
-                                  margin: const EdgeInsets.only(top: 4),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(15),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withOpacity(0.18),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                    ],
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(15),
-                                    child: Image.asset('logo.png', width: 62, height: 62, fit: BoxFit.cover),
-                                  ),
-                                ),
-                              ),
+                              const Center(child: _FinTraxBrandBadge(size: 62)),
                               const SizedBox(height: 12),
                               const Center(
                                 child: Text(
@@ -705,7 +716,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
 }
 
 // ===========================================================================
-// BOOKS & HOME SCREEN
+// BOOKS & HOME SCREEN (SLIDE TRANSITION, UNCLIPPED TITLES, BANK LOGOS)
 // ===========================================================================
 class BooksScreen extends StatefulWidget {
   const BooksScreen({Key? key}) : super(key: key);
@@ -1896,6 +1907,17 @@ class _BooksScreenState extends State<BooksScreen> {
                       itemBuilder: (ctx, i) {
                         final item = _pendingSms[i];
                         final isCredit = item.type == 'Income';
+                        final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
+                          currentMode: item.paymentMode,
+                          smsBody: item.body,
+                          sender: item.merchant,
+                        );
+                        final String? bankIconAsset = FinTraxBrandHelper.getPaymentIconAsset(
+                          resolvedMode,
+                          smsBody: item.body,
+                          sender: item.merchant,
+                        );
+
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                           title: Row(
@@ -1921,9 +1943,33 @@ class _BooksScreenState extends State<BooksScreen> {
                               const SizedBox(height: 10),
                               Row(
                                 children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        FinTraxBrandHelper.buildIconBadge(
+                                          assetPath: bankIconAsset,
+                                          fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedMode),
+                                          size: 13,
+                                          borderRadius: 3,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          resolvedMode,
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
-                                      '${item.paymentMode} • ${AppConstants.formatOrdinalDateTime(item.date)}',
+                                      AppConstants.formatOrdinalDateTime(item.date),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(fontSize: 11, color: Colors.grey),
@@ -2663,12 +2709,23 @@ class _BooksScreenState extends State<BooksScreen> {
                                       HapticFeedback.lightImpact();
                                       Navigator.push(
                                         context,
-                                        MaterialPageRoute(
-                                          builder: (_) => DashboardScreen(
+                                        PageRouteBuilder(
+                                          pageBuilder: (_, __, ___) => DashboardScreen(
                                             bookId: item['id'] as int,
                                             bookName: item['name'].toString(),
                                             bookType: bookType,
                                           ),
+                                          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                                            const begin = Offset(1.0, 0.0);
+                                            const end = Offset.zero;
+                                            const curve = Curves.easeInOutCubic;
+                                            var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+                                            return SlideTransition(
+                                              position: animation.drive(tween),
+                                              child: child,
+                                            );
+                                          },
+                                          transitionDuration: const Duration(milliseconds: 260),
                                         ),
                                       ).then((_) => _loadBooks());
                                     },
@@ -2712,73 +2769,11 @@ class _BooksScreenState extends State<BooksScreen> {
                                                 Row(
                                                   children: [
                                                     Expanded(
-                                                      child: Row(
-                                                        children: [
-                                                          Flexible(
-                                                            child: Text(
-                                                              item['name'].toString(),
-                                                              maxLines: 1,
-                                                              overflow: TextOverflow.ellipsis,
-                                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                                                            ),
-                                                          ),
-                                                          if (isLending) ...[
-                                                            const SizedBox(width: 6),
-                                                            Container(
-                                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                                              decoration: BoxDecoration(
-                                                                color: AppConstants.goldAccent.withOpacity(0.18),
-                                                                borderRadius: BorderRadius.circular(5),
-                                                                border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 0.6),
-                                                              ),
-                                                              child: const Text(
-                                                                'LENDING',
-                                                                style: TextStyle(
-                                                                  fontSize: 8,
-                                                                  fontWeight: FontWeight.w800,
-                                                                  color: AppConstants.goldAccent,
-                                                                  letterSpacing: 0.6,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        ],
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 8),
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-                                                      decoration: BoxDecoration(
-                                                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
-                                                        borderRadius: BorderRadius.circular(6),
-                                                      ),
                                                       child: Text(
-                                                        'Created on : ${AppConstants.formatOrdinalDate(createdDate)}',
-                                                        style: TextStyle(
-                                                          fontSize: 8.5,
-                                                          letterSpacing: -0.2,
-                                                          fontWeight: FontWeight.w500,
-                                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                                const SizedBox(height: 6),
-                                                Row(
-                                                  children: [
-                                                    Icon(Icons.schedule_rounded, size: 12, color: Colors.grey[500]),
-                                                    const SizedBox(width: 4),
-                                                    Expanded(
-                                                      child: Text(
-                                                        AppConstants.formatOrdinalDateTime(updatedDate),
+                                                        item['name'].toString(),
                                                         maxLines: 1,
                                                         overflow: TextOverflow.ellipsis,
-                                                        style: TextStyle(
-                                                          fontSize: 11,
-                                                          fontWeight: FontWeight.w500,
-                                                          color: isDark ? Colors.grey[500] : Colors.grey[600],
-                                                        ),
+                                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                                                       ),
                                                     ),
                                                     const SizedBox(width: 8),
@@ -2788,6 +2783,45 @@ class _BooksScreenState extends State<BooksScreen> {
                                                         fontWeight: FontWeight.w800,
                                                         fontSize: 16,
                                                         color: isNeg ? AppConstants.expenseRed : AppConstants.incomeGreen,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 5),
+                                                Row(
+                                                  children: [
+                                                    if (isLending) ...[
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                        decoration: BoxDecoration(
+                                                          color: AppConstants.goldAccent.withOpacity(0.18),
+                                                          borderRadius: BorderRadius.circular(4),
+                                                          border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 0.6),
+                                                        ),
+                                                        child: const Text(
+                                                          'LENDING',
+                                                          style: TextStyle(
+                                                            fontSize: 7.5,
+                                                            fontWeight: FontWeight.w800,
+                                                            color: AppConstants.goldAccent,
+                                                            letterSpacing: 0.5,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                    ],
+                                                    Icon(Icons.schedule_rounded, size: 11, color: Colors.grey[500]),
+                                                    const SizedBox(width: 3),
+                                                    Expanded(
+                                                      child: Text(
+                                                        AppConstants.formatOrdinalDateTime(updatedDate),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 10.5,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                                        ),
                                                       ),
                                                     ),
                                                   ],
@@ -3186,11 +3220,16 @@ class _BooksScreenState extends State<BooksScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final prefs = Provider.of<ThemeProvider>(context);
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 220),
-        child: _tabIndex == 0
-            ? KeyedSubtree(key: const ValueKey('books_tab'), child: _buildBooksTab(isDark, prefs.useMaterialYou))
-            : KeyedSubtree(key: const ValueKey('settings_tab'), child: _buildSettingsTab(context, isDark)),
+      body: PageView(
+        controller: PageController(initialPage: _tabIndex),
+        onPageChanged: (idx) {
+          HapticFeedback.selectionClick();
+          setState(() => _tabIndex = idx);
+        },
+        children: [
+          KeyedSubtree(key: const ValueKey('books_tab'), child: _buildBooksTab(isDark, prefs.useMaterialYou)),
+          KeyedSubtree(key: const ValueKey('settings_tab'), child: _buildSettingsTab(context, isDark)),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
