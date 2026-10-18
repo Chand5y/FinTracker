@@ -365,6 +365,7 @@ jobs:
           import android.content.pm.PackageManager
           import android.net.Uri
           import android.os.Build
+          import java.security.MessageDigest
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
           import io.flutter.plugin.common.MethodChannel
@@ -372,23 +373,32 @@ jobs:
           class MainActivity: FlutterActivity() {
               private val CHANNEL = "com.chandankumar.fintrack/sms"
               private var pendingSmsResult: MethodChannel.Result? = null
-              private var pendingNotifResult: MethodChannel.Result? = null
               private var pendingAuthResult: MethodChannel.Result? = null
               private var pendingPdfResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
               private var pendingInsightOpen: Boolean = false
 
-              override fun onCreate(savedInstanceState: android.os.Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  if (intent?.getBooleanExtra("open_monthly_insights", false) == true) {
-                      pendingInsightOpen = true
-                  }
-              }
-
-              override fun onNewIntent(intent: Intent) {
-                  super.onNewIntent(intent)
-                  if (intent.getBooleanExtra("open_monthly_insights", false)) {
-                      pendingInsightOpen = true
+              private fun getInstalledSha1(): String {
+                  return try {
+                      val bytes = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                          val info = packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                          val sigs = info.signingInfo?.apkContentsSigners
+                          sigs?.firstOrNull()?.toByteArray()
+                      } else {
+                          @Suppress("DEPRECATION")
+                          val info = packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+                          @Suppress("DEPRECATION")
+                          info.signatures?.firstOrNull()?.toByteArray()
+                      }
+                      if (bytes != null) {
+                          val md = MessageDigest.getInstance("SHA-1")
+                          val digest = md.digest(bytes)
+                          digest.joinToString(":") { "%02X".format(it) }
+                      } else {
+                          "UNKNOWN"
+                      }
+                  } catch (e: Exception) {
+                      "ERROR: ${e.message}"
                   }
               }
 
@@ -396,6 +406,12 @@ jobs:
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
                       when (call.method) {
+                          "getApkSignatureInfo" -> {
+                              result.success(mapOf(
+                                  "packageName" to packageName,
+                                  "sha1" to getInstalledSha1()
+                              ))
+                          }
                           "consumeMonthlyInsightIntent" -> {
                               val fromLaunch = intent?.getBooleanExtra("open_monthly_insights", false) == true
                               intent?.removeExtra("open_monthly_insights")
@@ -405,15 +421,11 @@ jobs:
                           }
                           "requestNotificationPermission" -> {
                               if (Build.VERSION.SDK_INT >= 33) {
-                                  if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") == PackageManager.PERMISSION_GRANTED) {
-                                      result.success(true)
-                                  } else {
-                                      pendingNotifResult = result
+                                  if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
                                       requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1007)
                                   }
-                              } else {
-                                  result.success(true)
                               }
+                              result.success(true)
                           }
                           "requestSmsPermission" -> {
                               if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -543,9 +555,6 @@ jobs:
                   if (requestCode == 1001) {
                       pendingSmsResult?.success(granted)
                       pendingSmsResult = null
-                  } else if (requestCode == 1007) {
-                      pendingNotifResult?.success(granted)
-                      pendingNotifResult = null
                   }
               }
 
@@ -582,19 +591,19 @@ jobs:
       - name: Generate App Icon
         run: dart run flutter_launcher_icons
         
-      - name: Build Single Universal APK
-        run: flutter build apk --release
+      - name: Build Lightweight Split APK
+        run: flutter build apk --release --split-per-abi
 
-      - name: Sign APK with Permanent Key
+      - name: Sign APK with Permanent Key & Verify SHA-1
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-release.apk
+          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
-          $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-release.apk
+          $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
           echo "=========================================================="
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: fintrax-release
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
