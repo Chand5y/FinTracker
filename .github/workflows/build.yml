@@ -445,7 +445,7 @@ jobs:
                                   when (value) {
                                       is Boolean -> editor.putBoolean(key, value)
                                       is Int -> editor.putInt(key, value)
-                                      is Long -> editor.putLong(key, value.toInt())
+                                      is Long -> editor.putInt(key, value.toInt())
                                       is String -> editor.putString(key, value)
                                       null -> editor.remove(key)
                                   }
