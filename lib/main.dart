@@ -29,71 +29,26 @@ class FinTraxLogoIcon extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF16243E), Color(0xFF0B1322)],
-        ),
-        borderRadius: BorderRadius.circular(size * 0.26),
-        border: Border.all(
-          color: AppConstants.goldAccent.withOpacity(0.55),
-          width: 1.6,
-        ),
+        borderRadius: BorderRadius.circular(size * 0.24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.28),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
+            color: Colors.black.withOpacity(0.22),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: CustomPaint(
-        painter: _FinTraxMonogramPainter(),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.24),
+        child: Image.asset(
+          'logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }
-}
-
-class _FinTraxMonogramPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-
-    final goldPaint = Paint()
-      ..color = AppConstants.goldAccent
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w * 0.068
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final fPath = Path()
-      ..moveTo(w * 0.26, h * 0.72)
-      ..lineTo(w * 0.26, h * 0.38)
-      ..quadraticBezierTo(w * 0.26, h * 0.27, w * 0.38, h * 0.27)
-      ..lineTo(w * 0.50, h * 0.27);
-    canvas.drawPath(fPath, goldPaint);
-
-    canvas.drawLine(
-      Offset(w * 0.26, h * 0.49),
-      Offset(w * 0.45, h * 0.49),
-      goldPaint,
-    );
-
-    final tPath = Path()
-      ..moveTo(w * 0.46, h * 0.27)
-      ..lineTo(w * 0.76, h * 0.27);
-    canvas.drawPath(tPath, goldPaint);
-
-    canvas.drawLine(
-      Offset(w * 0.61, h * 0.27),
-      Offset(w * 0.61, h * 0.72),
-      goldPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class FinTraxSplashScreen extends StatelessWidget {
