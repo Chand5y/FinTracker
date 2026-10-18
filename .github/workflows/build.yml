@@ -45,6 +45,24 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrax --org com.chandsy .
 
+      - name: Ensure logo.png is registered in pubspec.yaml
+        run: |
+          python3 - << 'EOF'
+          with open("pubspec.yaml", "r") as f:
+              content = f.read()
+          if "- logo.png" not in content:
+              if "assets:" in content:
+                  content = content.replace("assets:", "assets:\n    - logo.png", 1)
+              elif "uses-material-design: true" in content:
+                  content = content.replace(
+                      "uses-material-design: true",
+                      "uses-material-design: true\n  assets:\n    - logo.png",
+                      1,
+                  )
+              with open("pubspec.yaml", "w") as f:
+                  f.write(content)
+          EOF
+
       - name: Configure Native Bridge & Disable R8 Stripping
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
@@ -638,7 +656,7 @@ jobs:
       - name: Generate App Icon
         run: dart run flutter_launcher_icons
 
-      - name: Generate Native Branded Launch Screen (Logo + FinTrax Title)
+      - name: Generate Native Branded Launch Screen from logo.png
         run: |
           python3 -m pip install --quiet pillow
           python3 - << 'EOF'
@@ -646,12 +664,14 @@ jobs:
           from PIL import Image, ImageDraw, ImageFont
 
           icon_candidates = [
+              "logo.png",
+              "assets/logo.png",
+              "assets/icon/logo.png",
               "assets/icon/icon.png",
-              "assets/icon/app_icon.png",
-              "assets/icon.png",
-              "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+              "android/app/src/main/res/mipmap-xxxhdpi/launcher_icon.png",
           ]
           icon_path = next((p for p in icon_candidates if os.path.exists(p)), None)
+          print(f"Using splash logo from: {icon_path}")
 
           os.makedirs("android/app/src/main/res/drawable-nodpi", exist_ok=True)
           os.makedirs("android/app/src/main/res/drawable-night-nodpi", exist_ok=True)
