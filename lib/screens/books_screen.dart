@@ -191,6 +191,70 @@ class DebugLogsScreen extends StatelessWidget {
 }
 
 // ===========================================================================
+// SELF-CONTAINED BRAND LOGO BADGE FOR ONBOARDING
+// ===========================================================================
+class _FinTraxBrandBadge extends StatelessWidget {
+  final double size;
+  const _FinTraxBrandBadge({this.size = 72});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF16243E), Color(0xFF0B1322)],
+        ),
+        borderRadius: BorderRadius.circular(size * 0.26),
+        border: Border.all(color: AppConstants.goldAccent.withOpacity(0.55), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.25),
+            blurRadius: 14,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: CustomPaint(painter: _MonogramLogoPainter()),
+    );
+  }
+}
+
+class _MonogramLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final paint = Paint()
+      ..color = AppConstants.goldAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.068
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final fPath = Path()
+      ..moveTo(w * 0.26, h * 0.72)
+      ..lineTo(w * 0.26, h * 0.38)
+      ..quadraticBezierTo(w * 0.26, h * 0.27, w * 0.38, h * 0.27)
+      ..lineTo(w * 0.50, h * 0.27);
+    canvas.drawPath(fPath, paint);
+    canvas.drawLine(Offset(w * 0.26, h * 0.49), Offset(w * 0.45, h * 0.49), paint);
+
+    final tPath = Path()
+      ..moveTo(w * 0.46, h * 0.27)
+      ..lineTo(w * 0.76, h * 0.27);
+    canvas.drawPath(tPath, paint);
+    canvas.drawLine(Offset(w * 0.61, h * 0.27), Offset(w * 0.61, h * 0.72), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ===========================================================================
 // FIRST-INSTALL WELCOME & FRIENDLY PERMISSION SETUP FLOW
 // ===========================================================================
 class WelcomeSetupScreen extends StatefulWidget {
@@ -292,7 +356,6 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
       await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
     } catch (_) {}
 
-    // Give Android 250ms to finalize the permission grant state before checking
     await Future.delayed(const Duration(milliseconds: 250));
     try {
       final granted = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
@@ -443,27 +506,31 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 Expanded(
                   child: SingleChildScrollView(
                     child: _step == 0
                         ? Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              const Center(child: _FinTraxBrandBadge(size: 74)),
+                              const SizedBox(height: 16),
                               const Text(
                                 'Your Friendly Personal Finance Companion',
-                                style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1.25),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 22.5, fontWeight: FontWeight.w800, height: 1.25),
                               ),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 8),
                               Text(
                                 'FinTrax is built to help you truly understand where your hard-earned money goes every day—without complicated spreadsheets or boring accounting.',
-                                style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 13, height: 1.45, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                               ),
-                              const SizedBox(height: 20),
+                              const SizedBox(height: 18),
                               _featureTile(
                                 isDark,
                                 Icons.menu_book_rounded,
-                                'Smart Expense & Lending (Udhaar) Books',
+                                'Smart Expense & Lending Books',
                                 'Create dedicated books for Monthly Expenses, Groceries, Shopping, or Money Lent to friends so you never forget who owes you.',
                               ),
                               _featureTile(
@@ -478,7 +545,13 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                                 'Multi-Book Logging & Monthly Insights',
                                 'Save one expense into multiple books at once, export clean PDF statements, and get a full financial summary on the 1st of every month.',
                               ),
-                              const SizedBox(height: 8),
+                              _featureTile(
+                                isDark,
+                                Icons.cloud_done_outlined,
+                                'Biometric Security & Personal Google Drive Backup',
+                                'Lock FinTrax with your fingerprint and back up or restore on your personal Google Drive so your data stays safely saved forever—even when switching phones.',
+                              ),
+                              const SizedBox(height: 4),
                               Container(
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
@@ -496,12 +569,12 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           const Text(
-                                            '100% Offline • Zero Data Collection • Forever Free',
+                                            '100% Offline • Zero Data Collection • Zero Ads',
                                             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
                                           ),
                                           const SizedBox(height: 4),
                                           Text(
-                                            'FinTrax works completely offline on your phone. We have no servers, we never collect or share your data, and there are zero ads—forever.',
+                                            'FinTrax works completely offline on your phone. We have no servers, we never collect or share your data, and there are zero ads.',
                                             style: TextStyle(fontSize: 12, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                           ),
                                         ],
@@ -516,25 +589,29 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                             ? Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      color: scheme.primary.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(18),
+                                  Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: scheme.primary.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: Icon(Icons.notifications_active_rounded, size: 38, color: scheme.primary),
                                     ),
-                                    child: Icon(Icons.notifications_active_rounded, size: 36, color: scheme.primary),
                                   ),
                                   const SizedBox(height: 18),
                                   const Text(
                                     'Never Miss an Entry with a Friendly Evening Check-In',
+                                    textAlign: TextAlign.center,
                                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 10),
                                   Text(
                                     'Financial awareness comes down to one simple habit: taking 30 seconds in the evening to log what you spent today while it is still fresh in your mind.',
-                                    style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(fontSize: 13.5, height: 1.45, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                   ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(height: 18),
                                   _featureTile(
                                     isDark,
                                     Icons.schedule_rounded,
@@ -547,35 +624,51 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                                     '1st-of-the-Month Financial Summary',
                                     'Get notified on the 1st morning of every month when your previous month\'s shopping, grocery, and savings breakdown is ready.',
                                   ),
+                                  _featureTile(
+                                    isDark,
+                                    Icons.do_not_disturb_on_outlined,
+                                    'Zero Spam or Annoying Alerts',
+                                    'FinTrax never sends promotional spam or unnecessary notifications—only your chosen daily check-in and monthly summary.',
+                                  ),
                                 ],
                               )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      color: AppConstants.incomeGreen.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(18),
+                                  Center(
+                                    child: Container(
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: AppConstants.incomeGreen.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: const Icon(Icons.lock_outline_rounded, size: 38, color: AppConstants.incomeGreen),
                                     ),
-                                    child: const Icon(Icons.lock_outline_rounded, size: 36, color: AppConstants.incomeGreen),
                                   ),
                                   const SizedBox(height: 18),
                                   const Text(
                                     'Make Tracking Effortless with Local SMS Auto-Detection',
+                                    textAlign: TextAlign.center,
                                     style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                   ),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(height: 10),
                                   Text(
                                     'We know SMS permission feels sensitive—and you have every right to be cautious! Here is why FinTrax asks for it and how your privacy stays 100% protected:',
-                                    style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(fontSize: 13.5, height: 1.45, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                   ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(height: 18),
                                   _featureTile(
                                     isDark,
                                     Icons.bolt_rounded,
                                     'Why It Helps You',
                                     'Instead of typing every UPI payment or bank transfer by hand, FinTrax spots bank credit/debit alerts and prepares ready-to-save drafts for you.',
+                                  ),
+                                  _featureTile(
+                                    isDark,
+                                    Icons.receipt_long_rounded,
+                                    'Permanent SMS Record Saved with Entry',
+                                    'Whenever you add an expense from a bank SMS, the original transaction SMS is automatically saved inside that entry for your future reference.',
                                   ),
                                   _featureTile(
                                     isDark,
@@ -676,6 +769,9 @@ class _BooksScreenState extends State<BooksScreen> {
   List<ParsedSmsTransaction> _pendingSms = [];
   bool _loading = false;
   bool _showOnboarding = false;
+  bool _isSearchingBooks = false;
+  String _bookSearchQuery = '';
+  final TextEditingController _bookSearchController = TextEditingController();
   BookSort _sortOrder = BookSort.updated;
   Timer? _autoBackupTimer;
 
@@ -689,6 +785,7 @@ class _BooksScreenState extends State<BooksScreen> {
   @override
   void dispose() {
     _autoBackupTimer?.cancel();
+    _bookSearchController.dispose();
     super.dispose();
   }
 
@@ -717,14 +814,11 @@ class _BooksScreenState extends State<BooksScreen> {
     if (!mounted) return;
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
 
-    // Wait briefly if ThemeProvider is still reading SharedPreferences from disk
     for (int i = 0; i < 10 && !prefs.isInitialized; i++) {
       await Future.delayed(const Duration(milliseconds: 50));
     }
     if (!mounted) return;
 
-    // Ensure Smart SMS Auto-Track stays ON if Android SMS permission is granted
-    // (unless the user explicitly turned the switch off in Settings)
     try {
       final hasOsSmsPerm = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
       final manuallyTurnedOff = handledSet.contains('__sms_manually_off__');
@@ -733,7 +827,6 @@ class _BooksScreenState extends State<BooksScreen> {
       }
     } catch (_) {}
 
-    // Refresh SMS inbox now that preferences and permissions are synchronized
     await _refreshSmsInbox();
 
     if (!handledSet.contains('__default_9pm_migrated__')) {
@@ -916,7 +1009,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // SMART CREATE BOOK DIALOG WITH SUGGESTIONS & LENDING MODE
+  // SMART CREATE BOOK DIALOG (2 SUGGESTIONS PER ROW, COMPACT FONT)
   // ===========================================================================
   Future<int?> _promptCreateBook() async {
     HapticFeedback.lightImpact();
@@ -929,10 +1022,70 @@ class _BooksScreenState extends State<BooksScreen> {
       {'label': 'Grocery Expenses', 'type': 'standard', 'icon': '🛒'},
       {'label': 'Shopping Expenses', 'type': 'standard', 'icon': '🛍️'},
       {'label': 'Personal Expenses', 'type': 'standard', 'icon': '👤'},
-      {'label': 'Money Lent (Udhaar)', 'type': 'lending', 'icon': '🤝'},
+      {'label': 'Money Lent', 'type': 'lending', 'icon': '🤝'},
       {'label': 'Home & Bills', 'type': 'standard', 'icon': '🏠'},
       {'label': 'Travel & Trips', 'type': 'standard', 'icon': '✈️'},
+      {'label': 'Family & Medical', 'type': 'standard', 'icon': '🏥'},
     ];
+
+    Widget buildCompactSuggestionChip({
+      required Map<String, String> item,
+      required bool isDark,
+      required ColorScheme scheme,
+      required StateSetter setDialogState,
+    }) {
+      final String label = item['label']!;
+      final String type = item['type']!;
+      final String icon = item['icon']!;
+      final bool isSelected = ctrl.text.trim().toLowerCase() == label.toLowerCase();
+
+      return Material(
+        color: isSelected
+            ? scheme.primary.withOpacity(isDark ? 0.25 : 0.14)
+            : (isDark ? const Color(0xFF1A1D26) : const Color(0xFFF1F5F9)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: isSelected
+                ? scheme.primary
+                : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+            width: isSelected ? 1.3 : 1.0,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () {
+            HapticFeedback.selectionClick();
+            setDialogState(() {
+              ctrl.text = label;
+              ctrl.selection = TextSelection.fromPosition(TextPosition(offset: ctrl.text.length));
+              selectedBookType = type;
+            });
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            child: Row(
+              children: [
+                Text(icon, style: const TextStyle(fontSize: 12)),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return showDialog<int>(
       context: context,
@@ -941,164 +1094,167 @@ class _BooksScreenState extends State<BooksScreen> {
           final isDark = Theme.of(ctx).brightness == Brightness.dark;
           final scheme = Theme.of(ctx).colorScheme;
 
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-            title: const Text('Create New Book', style: TextStyle(fontWeight: FontWeight.w800)),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: ctrl,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: InputDecoration(
-                      hintText: 'e.g., $currentMonthName Expenses',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          final List<Widget> suggestionRows = [];
+          for (int i = 0; i < suggestions.length; i += 2) {
+            final first = suggestions[i];
+            final second = (i + 1 < suggestions.length) ? suggestions[i + 1] : null;
+            suggestionRows.add(
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: buildCompactSuggestionChip(
+                        item: first,
+                        isDark: isDark,
+                        scheme: scheme,
+                        setDialogState: setDialogState,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'BOOK TYPE',
-                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: Colors.grey[500]),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            setDialogState(() => selectedBookType = 'standard');
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-                            decoration: BoxDecoration(
-                              color: selectedBookType == 'standard'
-                                  ? scheme.primary.withOpacity(isDark ? 0.22 : 0.12)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: selectedBookType == 'standard'
-                                    ? scheme.primary
-                                    : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
-                                width: selectedBookType == 'standard' ? 1.5 : 1.0,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.book_rounded, size: 16, color: selectedBookType == 'standard' ? scheme.primary : Colors.grey),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    'Expense Book',
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: selectedBookType == 'standard' ? FontWeight.w800 : FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            setDialogState(() => selectedBookType = 'lending');
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-                            decoration: BoxDecoration(
-                              color: selectedBookType == 'lending'
-                                  ? AppConstants.goldAccent.withOpacity(isDark ? 0.22 : 0.14)
-                                  : Colors.transparent,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: selectedBookType == 'lending'
-                                    ? AppConstants.goldAccent
-                                    : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
-                                width: selectedBookType == 'lending' ? 1.5 : 1.0,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.handshake_rounded,
-                                  size: 16,
-                                  color: selectedBookType == 'lending' ? AppConstants.goldAccent : Colors.grey,
-                                ),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    'Lending / Udhaar',
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: selectedBookType == 'lending' ? FontWeight.w800 : FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'QUICK SUGGESTIONS',
-                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: Colors.grey[500]),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: suggestions.map((s) {
-                      final String label = s['label']!;
-                      final String type = s['type']!;
-                      final String icon = s['icon']!;
-                      final bool isSelected = ctrl.text.trim().toLowerCase() == label.toLowerCase();
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: second != null
+                          ? buildCompactSuggestionChip(
+                              item: second,
+                              isDark: isDark,
+                              scheme: scheme,
+                              setDialogState: setDialogState,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
 
-                      return ActionChip(
-                        avatar: Text(icon, style: const TextStyle(fontSize: 13)),
-                        label: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+          return AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            title: const Text('Create New Book', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 19)),
+            content: SizedBox(
+              width: MediaQuery.of(ctx).size.width,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: ctrl,
+                      autofocus: true,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: InputDecoration(
+                        hintText: 'e.g., $currentMonthName Expenses',
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'BOOK TYPE',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: Colors.grey[500]),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setDialogState(() => selectedBookType = 'standard');
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: selectedBookType == 'standard'
+                                    ? scheme.primary.withOpacity(isDark ? 0.22 : 0.12)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: selectedBookType == 'standard'
+                                      ? scheme.primary
+                                      : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                                  width: selectedBookType == 'standard' ? 1.4 : 1.0,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.book_rounded, size: 15, color: selectedBookType == 'standard' ? scheme.primary : Colors.grey),
+                                  const SizedBox(width: 5),
+                                  Flexible(
+                                    child: Text(
+                                      'Expense Book',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: selectedBookType == 'standard' ? FontWeight.w800 : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
-                        backgroundColor: isSelected
-                            ? scheme.primary.withOpacity(isDark ? 0.25 : 0.14)
-                            : (isDark ? const Color(0xFF1A1D26) : const Color(0xFFF1F5F9)),
-                        side: BorderSide(
-                          color: isSelected
-                              ? scheme.primary
-                              : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              setDialogState(() => selectedBookType = 'lending');
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: selectedBookType == 'lending'
+                                    ? AppConstants.goldAccent.withOpacity(isDark ? 0.22 : 0.14)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: selectedBookType == 'lending'
+                                      ? AppConstants.goldAccent
+                                      : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                                  width: selectedBookType == 'lending' ? 1.4 : 1.0,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.handshake_rounded,
+                                    size: 15,
+                                    color: selectedBookType == 'lending' ? AppConstants.goldAccent : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Flexible(
+                                    child: Text(
+                                      'Lending Ledger',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: selectedBookType == 'lending' ? FontWeight.w800 : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                        onPressed: () {
-                          HapticFeedback.selectionClick();
-                          setDialogState(() {
-                            ctrl.text = label;
-                            ctrl.selection = TextSelection.fromPosition(TextPosition(offset: ctrl.text.length));
-                            selectedBookType = type;
-                          });
-                        },
-                      );
-                    }).toList(),
-                  ),
-                ],
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'QUICK SUGGESTIONS',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1.0, color: Colors.grey[500]),
+                    ),
+                    const SizedBox(height: 6),
+                    ...suggestionRows,
+                  ],
+                ),
               ),
             ),
             actions: [
@@ -1164,7 +1320,7 @@ class _BooksScreenState extends State<BooksScreen> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 dense: true,
-                title: const Text('Lending / Udhaar Ledger', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                title: const Text('Lending Ledger', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
                 subtitle: const Text('Mark this book for money lent/borrowed', style: TextStyle(fontSize: 11)),
                 value: selectedType == 'lending',
                 onChanged: (v) {
@@ -1933,7 +2089,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // GOOGLE DRIVE CLOUD SYNC (SINGLE PROMPT + LIVE APK SHA-1 DIAGNOSTIC)
+  // GOOGLE DRIVE CLOUD SYNC
   // ===========================================================================
   void _showProgressModal(String label) {
     showDialog(
@@ -2012,7 +2168,7 @@ class _BooksScreenState extends State<BooksScreen> {
           'Google Play Services rejected the sign-in: ${e.message ?? e.code}\n\n'
           'Live APK Package: $livePkg\n'
           'Live APK SHA-1:\n$liveSha1\n\n'
-          'Make sure your Android OAuth Client in Google Cloud Console has this exact SHA-1 (notice "DB" in the 7th pair, not "D8").',
+          'If this account is not yet added under Google Cloud Console -> Audience -> Test Users, add the email there while the app is in Testing mode.',
         );
       }
       return null;
@@ -2321,10 +2477,46 @@ class _BooksScreenState extends State<BooksScreen> {
     final now = DateTime.now();
     final prevMonthName = _monthNames[DateTime(now.year, now.month - 1, 1).month - 1];
 
+    final filteredBooks = _bookSearchQuery.trim().isEmpty
+        ? _books
+        : _books
+            .where((b) => b['name']
+                .toString()
+                .toLowerCase()
+                .contains(_bookSearchQuery.trim().toLowerCase()))
+            .toList();
+
     return Scaffold(
       appBar: AppBar(
-        title: _buildHeaderLogo(isDark, dynamicColors),
+        title: _isSearchingBooks
+            ? TextField(
+                controller: _bookSearchController,
+                autofocus: true,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                decoration: const InputDecoration(
+                  hintText: 'Search books...',
+                  border: InputBorder.none,
+                ),
+                onChanged: (val) => setState(() => _bookSearchQuery = val),
+              )
+            : _buildHeaderLogo(isDark, dynamicColors),
         actions: [
+          IconButton(
+            tooltip: _isSearchingBooks ? 'Close Search' : 'Search Books',
+            icon: Icon(_isSearchingBooks ? Icons.close_rounded : Icons.search_rounded),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              setState(() {
+                if (_isSearchingBooks) {
+                  _isSearchingBooks = false;
+                  _bookSearchQuery = '';
+                  _bookSearchController.clear();
+                } else {
+                  _isSearchingBooks = true;
+                }
+              });
+            },
+          ),
           IconButton(
             tooltip: 'Monthly Financial Insights',
             icon: const Icon(Icons.insights_rounded),
@@ -2350,12 +2542,13 @@ class _BooksScreenState extends State<BooksScreen> {
       ),
       body: Column(
         children: [
-          if (now.day <= 5 && _books.isNotEmpty)
+          if (now.day <= 5 && _books.isNotEmpty && !_isSearchingBooks)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Material(
                 color: scheme.primary.withOpacity(isDark ? 0.16 : 0.10),
                 borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
                   onTap: () => _openMonthlyInsightsSheet(initialPreviousMonth: true),
@@ -2380,12 +2573,13 @@ class _BooksScreenState extends State<BooksScreen> {
                 ),
               ),
             ),
-          if (_pendingSms.isNotEmpty)
+          if (_pendingSms.isNotEmpty && !_isSearchingBooks)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Material(
                 color: accent.withOpacity(isDark ? 0.18 : 0.12),
                 borderRadius: BorderRadius.circular(14),
+                clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
                   onTap: _openSmsReviewSheet,
@@ -2426,184 +2620,198 @@ class _BooksScreenState extends State<BooksScreen> {
                           ],
                         ),
                       )
-                    : ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 96, top: 8),
-                        itemCount: _books.length,
-                        itemBuilder: (ctx, idx) {
-                          final item = _books[idx];
-                          final pinned = (item['isPinned'] ?? 0) == 1;
-                          final String bookType = item['bookType']?.toString() ?? 'standard';
-                          final bool isLending = bookType == 'lending';
-                          final balance = ((item['totalIn'] ?? 0) as num).toDouble() - ((item['totalOut'] ?? 0) as num).toDouble();
-                          final isNeg = balance < 0;
-
-                          final bg = isDark
-                              ? (pinned ? const Color(0xFF171A24) : AppConstants.cardDark)
-                              : (pinned ? const Color(0xFFFAF6EE) : AppConstants.cardLight);
-                          final border = isLending
-                              ? AppConstants.goldAccent.withOpacity(0.55)
-                              : (isDark
-                                  ? (pinned ? accent.withOpacity(0.45) : AppConstants.borderDark)
-                                  : (pinned ? accent.withOpacity(0.40) : AppConstants.borderLight));
-
-                          final createdDate = DateTime.tryParse(item['createdAt']?.toString() ?? '') ?? DateTime.now();
-                          final updatedDate = DateTime.tryParse(item['updatedAt']?.toString() ?? '') ?? DateTime.now();
-
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                            child: Material(
-                              color: bg,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                side: BorderSide(color: border, width: isLending ? 1.2 : 1.0),
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(18),
-                                onTap: () {
-                                  HapticFeedback.lightImpact();
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => DashboardScreen(
-                                        bookId: item['id'] as int,
-                                        bookName: item['name'].toString(),
-                                        bookType: bookType,
-                                      ),
-                                    ),
-                                  ).then((_) => _loadBooks());
-                                },
-                                onLongPress: () => _openBookMenu(
-                                  item['id'] as int,
-                                  item['name'].toString(),
-                                  (item['isPinned'] ?? 0) as int,
-                                  bookType,
+                    : filteredBooks.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.search_off_rounded, size: 48, color: Colors.grey[500]),
+                                const SizedBox(height: 10),
+                                Text(
+                                  'No books matching "$_bookSearchQuery"',
+                                  style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: Colors.grey[500]),
                                 ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(11),
-                                        decoration: BoxDecoration(
-                                          color: isLending
-                                              ? AppConstants.goldAccent.withOpacity(0.15)
-                                              : (dynamicColors
-                                                  ? scheme.primary.withOpacity(0.12)
-                                                  : (isDark ? AppConstants.iconNavy : const Color(0xFFF5EFE2))),
-                                          borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: accent.withOpacity(0.35), width: 0.8),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(bottom: 96, top: 8),
+                            itemCount: filteredBooks.length,
+                            itemBuilder: (ctx, idx) {
+                              final item = filteredBooks[idx];
+                              final pinned = (item['isPinned'] ?? 0) == 1;
+                              final String bookType = item['bookType']?.toString() ?? 'standard';
+                              final bool isLending = bookType == 'lending';
+                              final balance = ((item['totalIn'] ?? 0) as num).toDouble() - ((item['totalOut'] ?? 0) as num).toDouble();
+                              final isNeg = balance < 0;
+
+                              final bg = isDark
+                                  ? (pinned ? const Color(0xFF171A24) : AppConstants.cardDark)
+                                  : (pinned ? const Color(0xFFFAF6EE) : AppConstants.cardLight);
+                              final border = isLending
+                                  ? AppConstants.goldAccent.withOpacity(0.55)
+                                  : (isDark
+                                      ? (pinned ? accent.withOpacity(0.45) : AppConstants.borderDark)
+                                      : (pinned ? accent.withOpacity(0.40) : AppConstants.borderLight));
+
+                              final createdDate = DateTime.tryParse(item['createdAt']?.toString() ?? '') ?? DateTime.now();
+                              final updatedDate = DateTime.tryParse(item['updatedAt']?.toString() ?? '') ?? DateTime.now();
+
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                child: Material(
+                                  color: bg,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                    side: BorderSide(color: border, width: isLending ? 1.2 : 1.0),
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(18),
+                                    onTap: () {
+                                      HapticFeedback.lightImpact();
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => DashboardScreen(
+                                            bookId: item['id'] as int,
+                                            bookName: item['name'].toString(),
+                                            bookType: bookType,
+                                          ),
                                         ),
-                                        child: Icon(
-                                          isLending
-                                              ? Icons.handshake_rounded
-                                              : (pinned ? Icons.push_pin_rounded : Icons.book_rounded),
-                                          color: isLending
-                                              ? AppConstants.goldAccent
-                                              : (dynamicColors ? scheme.primary : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText)),
-                                          size: 20,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Row(
+                                      ).then((_) => _loadBooks());
+                                    },
+                                    onLongPress: () => _openBookMenu(
+                                      item['id'] as int,
+                                      item['name'].toString(),
+                                      (item['isPinned'] ?? 0) as int,
+                                      bookType,
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(11),
+                                            decoration: BoxDecoration(
+                                              color: isLending
+                                                  ? AppConstants.goldAccent.withOpacity(0.15)
+                                                  : (dynamicColors
+                                                      ? scheme.primary.withOpacity(0.12)
+                                                      : (isDark ? AppConstants.iconNavy : const Color(0xFFF5EFE2))),
+                                              borderRadius: BorderRadius.circular(12),
+                                              border: Border.all(color: accent.withOpacity(0.35), width: 0.8),
+                                            ),
+                                            child: Icon(
+                                              isLending
+                                                  ? Icons.handshake_rounded
+                                                  : (pinned ? Icons.push_pin_rounded : Icons.book_rounded),
+                                              color: isLending
+                                                  ? AppConstants.goldAccent
+                                                  : (dynamicColors ? scheme.primary : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText)),
+                                              size: 20,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 14),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                Expanded(
-                                                  child: Row(
-                                                    children: [
-                                                      Flexible(
-                                                        child: Text(
-                                                          item['name'].toString(),
-                                                          maxLines: 1,
-                                                          overflow: TextOverflow.ellipsis,
-                                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                                                        ),
-                                                      ),
-                                                      if (isLending) ...[
-                                                        const SizedBox(width: 6),
-                                                        Container(
-                                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                                          decoration: BoxDecoration(
-                                                            color: AppConstants.goldAccent.withOpacity(0.18),
-                                                            borderRadius: BorderRadius.circular(5),
-                                                            border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 0.6),
-                                                          ),
-                                                          child: const Text(
-                                                            'LENDING',
-                                                            style: TextStyle(
-                                                              fontSize: 8,
-                                                              fontWeight: FontWeight.w800,
-                                                              color: AppConstants.goldAccent,
-                                                              letterSpacing: 0.6,
+                                                Row(
+                                                  children: [
+                                                    Expanded(
+                                                      child: Row(
+                                                        children: [
+                                                          Flexible(
+                                                            child: Text(
+                                                              item['name'].toString(),
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                                                             ),
                                                           ),
+                                                          if (isLending) ...[
+                                                            const SizedBox(width: 6),
+                                                            Container(
+                                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                                              decoration: BoxDecoration(
+                                                                color: AppConstants.goldAccent.withOpacity(0.18),
+                                                                borderRadius: BorderRadius.circular(5),
+                                                                border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 0.6),
+                                                              ),
+                                                              child: const Text(
+                                                                'LENDING',
+                                                                style: TextStyle(
+                                                                  fontSize: 8,
+                                                                  fontWeight: FontWeight.w800,
+                                                                  color: AppConstants.goldAccent,
+                                                                  letterSpacing: 0.6,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                                      decoration: BoxDecoration(
+                                                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                                                        borderRadius: BorderRadius.circular(6),
+                                                      ),
+                                                      child: Text(
+                                                        'Created on : ${AppConstants.formatOrdinalDate(createdDate)}',
+                                                        style: TextStyle(
+                                                          fontSize: 8.5,
+                                                          letterSpacing: -0.2,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
                                                         ),
-                                                      ],
-                                                    ],
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
-                                                  decoration: BoxDecoration(
-                                                    color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
-                                                    borderRadius: BorderRadius.circular(6),
-                                                  ),
-                                                  child: Text(
-                                                    'Created on : ${AppConstants.formatOrdinalDate(createdDate)}',
-                                                    style: TextStyle(
-                                                      fontSize: 8.5,
-                                                      letterSpacing: -0.2,
-                                                      fontWeight: FontWeight.w500,
-                                                      color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                                      ),
                                                     ),
-                                                  ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 6),
+                                                Row(
+                                                  children: [
+                                                    Icon(Icons.schedule_rounded, size: 12, color: Colors.grey[500]),
+                                                    const SizedBox(width: 4),
+                                                    Expanded(
+                                                      child: Text(
+                                                        AppConstants.formatOrdinalDateTime(updatedDate),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      '${isNeg ? '-' : ''}${AppConstants.defaultCurrency}${balance.abs().toStringAsFixed(0)}',
+                                                      style: TextStyle(
+                                                        fontWeight: FontWeight.w800,
+                                                        fontSize: 16,
+                                                        color: isNeg ? AppConstants.expenseRed : AppConstants.incomeGreen,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ],
                                             ),
-                                            const SizedBox(height: 6),
-                                            Row(
-                                              children: [
-                                                Icon(Icons.schedule_rounded, size: 12, color: Colors.grey[500]),
-                                                const SizedBox(width: 4),
-                                                Expanded(
-                                                  child: Text(
-                                                    AppConstants.formatOrdinalDateTime(updatedDate),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      fontSize: 11,
-                                                      fontWeight: FontWeight.w500,
-                                                      color: isDark ? Colors.grey[500] : Colors.grey[600],
-                                                    ),
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  '${isNeg ? '-' : ''}${AppConstants.defaultCurrency}${balance.abs().toStringAsFixed(0)}',
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.w800,
-                                                    fontSize: 16,
-                                                    color: isNeg ? AppConstants.expenseRed : AppConstants.incomeGreen,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                              );
+                            },
+                          ),
           ),
         ],
       ),
@@ -2615,16 +2823,20 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  /// Uses Material with RoundedRectangleBorder & Clip.antiAlias so taps and long-presses
+  /// never show sharp square corners on the top or bottom item of a settings card.
   Widget _settingsGroupCard(bool isDark, List<Widget> children) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: BoxDecoration(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Material(
         color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(children: children),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(children: children),
     );
   }
 
@@ -2697,7 +2909,7 @@ class _BooksScreenState extends State<BooksScreen> {
               dense: true,
               secondary: Icon(Icons.palette_outlined, color: scheme.primary, size: 21),
               title: const Text('Material You Colors', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
-              subtitle: const Text('Use wallpaper colors instead of Gold', style: TextStyle(fontSize: 11.5)),
+              subtitle: const Text('Use wallpaper colors instead of the default color', style: TextStyle(fontSize: 11.5)),
               value: prefs.useMaterialYou,
               onChanged: (v) {
                 HapticFeedback.lightImpact();
@@ -2901,7 +3113,7 @@ class _BooksScreenState extends State<BooksScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        '100% Free • Offline • Zero Ads',
+                        '100% Offline • Zero Data Collection • Zero Ads',
                         style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
                       ),
                       const SizedBox(height: 3),
