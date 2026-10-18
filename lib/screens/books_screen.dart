@@ -62,11 +62,8 @@ class AppLogger {
   }
 
   Future<void> logRuntimeEnvironment(GoogleSignIn googleAuth, ThemeProvider prefs) async {
-    log('--- Inspecting Runtime Environment ---', tag: 'ENV');
-    log('OS: ${Platform.operatingSystem} | Version: ${Platform.operatingSystemVersion}', tag: 'ENV');
-    log('GoogleSignIn Configured Scopes: ${googleAuth.scopes.join(", ")}', tag: 'OAUTH_CFG');
-    log('Saved Drive Account in Prefs: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
-    log('--- Runtime Environment Check Complete ---', tag: 'ENV');
+    log('OS: ${Platform.operatingSystem} | Scopes: ${googleAuth.scopes.join(", ")}', tag: 'ENV');
+    log('Saved Drive Account: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
   }
 
   static String explainPlayServicesCode(String rawMessage, String code) {
@@ -86,8 +83,7 @@ class AppLogger {
 
   Future<String?> saveLogsToDownloads() async {
     final fileName = 'FinTrax_Debug_Log_${DateTime.now().millisecondsSinceEpoch}.txt';
-    final fullText = dumpAllText();
-    final bytes = Uint8List.fromList(utf8.encode(fullText));
+    final bytes = Uint8List.fromList(utf8.encode(dumpAllText()));
 
     try {
       final downloadDir = Directory('/storage/emulated/0/Download');
@@ -125,11 +121,9 @@ class DebugLogsScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.copy_all_rounded),
-            tooltip: 'Copy All Logs',
             onPressed: () async {
               HapticFeedback.lightImpact();
-              final text = AppLogger.instance.dumpAllText();
-              await Clipboard.setData(ClipboardData(text: text));
+              await Clipboard.setData(ClipboardData(text: AppLogger.instance.dumpAllText()));
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Logs copied to clipboard!'), backgroundColor: AppConstants.incomeGreen),
@@ -139,7 +133,6 @@ class DebugLogsScreen extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.delete_sweep_rounded),
-            tooltip: 'Clear Logs',
             onPressed: () {
               HapticFeedback.mediumImpact();
               AppLogger.instance.clear();
@@ -147,7 +140,6 @@ class DebugLogsScreen extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.download_rounded),
-            tooltip: 'Save .txt to Downloads',
             onPressed: () async {
               HapticFeedback.mediumImpact();
               final savedPath = await AppLogger.instance.saveLogsToDownloads();
@@ -222,7 +214,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
     if (enable) {
       try {
-        await _nativeBridge.invokeMethod('requestNotificationPermission');
+        await _nativeBridge.invokeMethod('requestNotificationPermission').timeout(const Duration(seconds: 15));
       } catch (_) {}
       await prefs.setDailyReminder(enabled: true, hour: 21, minute: 0);
       try {
@@ -242,12 +234,20 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
     HapticFeedback.mediumImpact();
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
     if (enable) {
-      final granted = await _nativeBridge.invokeMethod<bool>('requestSmsPermission') ?? false;
+      bool granted = false;
+      try {
+        granted = await _nativeBridge
+                .invokeMethod<bool>('requestSmsPermission')
+                .timeout(const Duration(seconds: 15)) ??
+            false;
+      } catch (_) {}
       await prefs.setSmsAutoTrack(granted);
     } else {
       await prefs.setSmsAutoTrack(false);
     }
-    await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+    try {
+      await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+    } catch (_) {}
     widget.onFinished();
   }
 
@@ -342,7 +342,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                             ),
                             const SizedBox(height: 10),
                             Text(
-                              'We built FinTrax with one simple goal: to help you truly understand where your hard-earned money goes every day—without complicated spreadsheets or boring accounting.',
+                              'FinTrax is built to help you truly understand where your hard-earned money goes every day—without complicated spreadsheets or boring accounting.',
                               style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                             ),
                             const SizedBox(height: 20),
@@ -417,7 +417,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  'Building financial awareness comes down to one tiny habit: taking 30 seconds in the evening to log what you spent today while it is still fresh in your mind.',
+                                  'Financial awareness comes down to one simple habit: taking 30 seconds in the evening to log what you spent today while it is still fresh in your mind.',
                                   style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                 ),
                                 const SizedBox(height: 16),
@@ -453,7 +453,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  'We know SMS permission feels sensitive—and you have every right to be cautious! Here is exactly why FinTrax asks for it and how your privacy stays 100% protected:',
+                                  'We know SMS permission feels sensitive—and you have every right to be cautious! Here is why FinTrax asks for it and how your privacy stays 100% protected:',
                                   style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                 ),
                                 const SizedBox(height: 16),
@@ -473,7 +473,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                                   isDark,
                                   Icons.shield_outlined,
                                   'OTPs & Personal Chats Are Ignored',
-                                  'FinTrax automatically ignores OTPs, verification codes, and personal conversations, looking only at transaction amounts.',
+                                  'FinTrax automatically ignores OTPs, verification codes, and personal conversations, looking only at bank transaction amounts.',
                                 ),
                               ],
                             ),
@@ -564,29 +564,45 @@ class _BooksScreenState extends State<BooksScreen> {
   bool _showOnboarding = false;
   BookSort _sortOrder = BookSort.updated;
   Timer? _autoBackupTimer;
+  Timer? _loadingWatchdog;
 
   @override
   void initState() {
     super.initState();
     AppLogger.instance.log('BooksScreen.initState() called.', tag: 'LIFECYCLE');
-    _loadBooks();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initBackgroundTasks());
+    // Safety watchdog so _loading can never stay true longer than 1.5 seconds
+    _loadingWatchdog = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted && _loading) {
+        setState(() => _loading = false);
+      }
+    });
+    _startupSequence();
   }
 
   @override
   void dispose() {
     _autoBackupTimer?.cancel();
+    _loadingWatchdog?.cancel();
     super.dispose();
+  }
+
+  Future<void> _startupSequence() async {
+    await _loadBooks();
+    if (mounted) {
+      await _initBackgroundTasks();
+    }
   }
 
   Future<void> _initBackgroundTasks() async {
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
-    if (!prefs.isInitialized) {
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
     if (!mounted) return;
 
-    final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
+    Set<String> handledSet = <String>{};
+    try {
+      handledSet = await DatabaseHelper.instance
+          .getHandledSmsIds()
+          .timeout(const Duration(seconds: 2), onTimeout: () => <String>{});
+    } catch (_) {}
 
     // Migrate default 10:00 PM (22:00) reminder to 9:00 PM (21:00) once
     if (!handledSet.contains('__default_9pm_migrated__')) {
@@ -597,7 +613,9 @@ class _BooksScreenState extends State<BooksScreen> {
           minute: 0,
         );
       }
-      await DatabaseHelper.instance.markSmsHandled('__default_9pm_migrated__', 'done');
+      try {
+        await DatabaseHelper.instance.markSmsHandled('__default_9pm_migrated__', 'done');
+      } catch (_) {}
     }
 
     // Show First-Install Welcome & Permission Setup if not completed yet
@@ -613,13 +631,11 @@ class _BooksScreenState extends State<BooksScreen> {
         'enabled': prefs.dailyReminderEnabled,
         'hour': prefs.reminderHour,
         'minute': prefs.reminderMinute,
-      });
-    } catch (e) {
-      AppLogger.instance.log('scheduleDailyReminder error: $e', tag: 'WARN');
-    }
+      }).timeout(const Duration(seconds: 2));
+    } catch (_) {}
 
-    await _checkAndShowFirstOfMonthInsights();
-    await _runSilentDailyBackup();
+    await _checkAndShowFirstOfMonthInsights(handledSet);
+    unawaited(_runSilentDailyBackup());
 
     final now = DateTime.now();
     final nextRun = DateTime(now.year, now.month, now.day + 1, 0, 5);
@@ -627,16 +643,18 @@ class _BooksScreenState extends State<BooksScreen> {
     _autoBackupTimer = Timer(nextRun.difference(now), _runSilentDailyBackup);
   }
 
-  Future<void> _checkAndShowFirstOfMonthInsights() async {
+  Future<void> _checkAndShowFirstOfMonthInsights(Set<String> handledSet) async {
     try {
       bool launchedFromInsightNotif = false;
       try {
-        launchedFromInsightNotif = await _nativeBridge.invokeMethod<bool>('consumeMonthlyInsightIntent') ?? false;
+        launchedFromInsightNotif = await _nativeBridge
+                .invokeMethod<bool>('consumeMonthlyInsightIntent')
+                .timeout(const Duration(seconds: 1)) ??
+            false;
       } catch (_) {}
 
       final now = DateTime.now();
       final markerKey = '__monthly_insight_shown_${now.year}_${now.month}__';
-      final handledSet = await DatabaseHelper.instance.getHandledSmsIds();
 
       if (launchedFromInsightNotif) {
         await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
@@ -656,9 +674,7 @@ class _BooksScreenState extends State<BooksScreen> {
           _openMonthlyInsightsSheet(initialPreviousMonth: true);
         }
       }
-    } catch (e) {
-      AppLogger.instance.log('Monthly insight check error: $e', tag: 'WARN');
-    }
+    } catch (_) {}
   }
 
   String _todayStamp() {
@@ -693,9 +709,11 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _loadBooks() async {
     if (!mounted) return;
-    setState(() => _loading = true);
     try {
-      final rows = await DatabaseHelper.instance.getBooksWithBalances();
+      final rows = await DatabaseHelper.instance
+          .getBooksWithBalances()
+          .timeout(const Duration(seconds: 2), onTimeout: () => <Map<String, dynamic>>[]);
+
       rows.sort((a, b) {
         final pinA = (a['isPinned'] ?? 0) as int;
         final pinB = (b['isPinned'] ?? 0) as int;
@@ -718,26 +736,38 @@ class _BooksScreenState extends State<BooksScreen> {
         }
       });
 
-      if (mounted) setState(() => _books = rows);
-      await _refreshSmsInbox();
+      if (mounted) {
+        setState(() {
+          _books = rows;
+          _loading = false;
+        });
+      }
+      // Refresh SMS in background without blocking the UI
+      unawaited(_refreshSmsInbox());
     } catch (e) {
       AppLogger.instance.log('Book load error: $e', tag: 'ERROR');
-    } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   Future<void> _refreshSmsInbox() async {
+    if (!mounted) return;
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
     if (!prefs.smsAutoTrack) {
       if (mounted) setState(() => _pendingSms = []);
       return;
     }
     try {
-      final permitted = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
+      final permitted = await _nativeBridge
+              .invokeMethod<bool>('checkSmsPermission')
+              .timeout(const Duration(seconds: 2), onTimeout: () => false) ??
+          false;
       if (!permitted) return;
 
-      final rawList = await _nativeBridge.invokeMethod<List<dynamic>>('getBankSms') ?? [];
+      final rawList = await _nativeBridge
+              .invokeMethod<List<dynamic>>('getBankSms')
+              .timeout(const Duration(seconds: 3), onTimeout: () => <dynamic>[]) ??
+          [];
       final ignoredIds = await DatabaseHelper.instance.getHandledSmsIds();
 
       final detected = <ParsedSmsTransaction>[];
