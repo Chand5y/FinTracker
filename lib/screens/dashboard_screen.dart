@@ -225,6 +225,11 @@ class DashboardScreen extends StatefulWidget {
                 ...List.generate(transactions.length, (idx) {
                   final tx = transactions[idx];
                   final bool isIncome = tx.type == 'Income';
+                  final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
+                    currentMode: tx.paymentMode,
+                    smsBody: tx.effectiveSmsText,
+                    sender: tx.name,
+                  );
                   return pw.TableRow(
                     decoration: pw.BoxDecoration(color: idx.isEven ? PdfColors.white : rowAltBg),
                     children: [
@@ -242,7 +247,7 @@ class DashboardScreen extends StatefulWidget {
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(8),
-                        child: pw.Text(tx.paymentMode, style: const pw.TextStyle(fontSize: 8.5, color: navyBg)),
+                        child: pw.Text(resolvedMode, style: const pw.TextStyle(fontSize: 8.5, color: navyBg)),
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(8),
@@ -590,7 +595,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Text(widget.bookName),
             if (isLending)
               const Text(
-                'LENDING / UDHAAR LEDGER',
+                'LENDING LEDGER',
                 style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: AppConstants.goldAccent, letterSpacing: 1.0),
               ),
           ],
@@ -685,6 +690,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       final bool hasSms = tx.effectiveSmsText.isNotEmpty;
                       final bool hasNote = tx.hasUserNote;
 
+                      final String displayPaymentMode = FinTraxBrandHelper.detectPaymentMethod(
+                        currentMode: tx.paymentMode,
+                        smsBody: tx.effectiveSmsText,
+                        sender: tx.name,
+                      );
+                      final String? bankIconAsset = FinTraxBrandHelper.getPaymentIconAsset(
+                        displayPaymentMode,
+                        smsBody: tx.effectiveSmsText,
+                        sender: tx.name,
+                      );
+                      final String? merchantIconAsset = FinTraxBrandHelper.getMerchantIconAsset(
+                        tx.name,
+                        smsBody: tx.effectiveSmsText,
+                      );
+
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
                         child: Material(
@@ -715,8 +735,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Expanded(
-                                        child: Text(tx.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                                        child: Row(
+                                          children: [
+                                            if (merchantIconAsset != null) ...[
+                                              ClipRRect(
+                                                borderRadius: BorderRadius.circular(6),
+                                                child: Image.asset(
+                                                  merchantIconAsset,
+                                                  width: 20,
+                                                  height: 20,
+                                                  fit: BoxFit.contain,
+                                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                            ],
+                                            Expanded(
+                                              child: Text(
+                                                tx.name,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
+                                      const SizedBox(width: 8),
                                       Text(
                                         '${tx.type == 'Income' ? '+' : '-'}${AppConstants.defaultCurrency}${tx.amount.toStringAsFixed(0)}',
                                         style: TextStyle(
@@ -735,14 +780,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Row(
                                     children: [
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                                         decoration: BoxDecoration(
                                           color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
                                           borderRadius: BorderRadius.circular(6),
                                         ),
-                                        child: Text(
-                                          '${AppConstants.paymentModeEmojis[tx.paymentMode] ?? '💳'} ${tx.paymentMode}',
-                                          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            FinTraxBrandHelper.buildIconBadge(
+                                              assetPath: bankIconAsset,
+                                              fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(displayPaymentMode),
+                                              size: 14,
+                                              borderRadius: 3,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              displayPaymentMode,
+                                              style: TextStyle(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w700,
+                                                color: isDark ? Colors.grey[300] : Colors.grey[800],
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                       const SizedBox(width: 8),
