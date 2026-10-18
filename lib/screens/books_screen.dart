@@ -66,21 +66,6 @@ class AppLogger {
     log('Saved Drive Account: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
   }
 
-  static String explainPlayServicesCode(String rawMessage, String code) {
-    final combined = '$code $rawMessage';
-    if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
-      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the OAuth handshake. '
-          'Note: Changes in Google Cloud Console can take 5 to 30 minutes to propagate across Google servers.';
-    }
-    if (combined.contains('12500:')) {
-      return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete.';
-    }
-    if (combined.contains('12501:')) {
-      return 'CODE 12501 (SIGN_IN_CANCELLED): The account picker was closed or cancelled before completion.';
-    }
-    return 'PlatformException ($code): $rawMessage';
-  }
-
   Future<String?> saveLogsToDownloads() async {
     final fileName = 'FinTrax_Debug_Log_${DateTime.now().millisecondsSinceEpoch}.txt';
     final bytes = Uint8List.fromList(utf8.encode(dumpAllText()));
@@ -209,45 +194,35 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   int _step = 0;
 
-  Future<void> _handleNotificationStep(bool enable) async {
+  void _handleNotificationStep(bool enable) {
     HapticFeedback.mediumImpact();
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
+    
+    // Transition UI instantly to prevent freezing
+    setState(() => _step = 2);
+
     if (enable) {
-      try {
-        await _nativeBridge.invokeMethod('requestNotificationPermission').timeout(const Duration(seconds: 15));
-      } catch (_) {}
-      await prefs.setDailyReminder(enabled: true, hour: 21, minute: 0);
-      try {
-        await _nativeBridge.invokeMethod('scheduleDailyReminder', {
-          'enabled': true,
-          'hour': 21,
-          'minute': 0,
-        });
-      } catch (_) {}
+      prefs.setDailyReminder(enabled: true, hour: 21, minute: 0);
+      _nativeBridge.invokeMethod('requestNotificationPermission');
+      _nativeBridge.invokeMethod('scheduleDailyReminder', {'enabled': true, 'hour': 21, 'minute': 0});
     } else {
-      await prefs.setDailyReminder(enabled: false, hour: 21, minute: 0);
+      prefs.setDailyReminder(enabled: false, hour: 21, minute: 0);
     }
-    if (mounted) setState(() => _step = 2);
   }
 
-  Future<void> _handleSmsStep(bool enable) async {
+  void _handleSmsStep(bool enable) {
     HapticFeedback.mediumImpact();
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
+
     if (enable) {
-      bool granted = false;
-      try {
-        granted = await _nativeBridge
-                .invokeMethod<bool>('requestSmsPermission')
-                .timeout(const Duration(seconds: 15)) ??
-            false;
-      } catch (_) {}
-      await prefs.setSmsAutoTrack(granted);
+      _nativeBridge.invokeMethod<bool>('requestSmsPermission').then((granted) {
+        prefs.setSmsAutoTrack(granted ?? false);
+      });
     } else {
-      await prefs.setSmsAutoTrack(false);
+      prefs.setSmsAutoTrack(false);
     }
-    try {
-      await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
-    } catch (_) {}
+    
+    DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
     widget.onFinished();
   }
 
@@ -546,8 +521,8 @@ class _BooksScreenState extends State<BooksScreen> {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   static const String _driveAppDataScope = 'https://www.googleapis.com/auth/drive.appdata';
   static const String _backupFileName = 'fintrax_cloud_backup.json';
-  static const String _webServerClientId = '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com';
 
+  // Direct Android GoogleSignIn without Server Client ID
   final GoogleSignIn _googleAuth = GoogleSignIn(
     scopes: <String>[_driveAppDataScope],
   );
@@ -570,7 +545,6 @@ class _BooksScreenState extends State<BooksScreen> {
   void initState() {
     super.initState();
     AppLogger.instance.log('BooksScreen.initState() called.', tag: 'LIFECYCLE');
-    // Safety watchdog so _loading can never stay true longer than 1.5 seconds
     _loadingWatchdog = Timer(const Duration(milliseconds: 1500), () {
       if (mounted && _loading) {
         setState(() => _loading = false);
@@ -604,7 +578,6 @@ class _BooksScreenState extends State<BooksScreen> {
           .timeout(const Duration(seconds: 2), onTimeout: () => <String>{});
     } catch (_) {}
 
-    // Migrate default 10:00 PM (22:00) reminder to 9:00 PM (21:00) once
     if (!handledSet.contains('__default_9pm_migrated__')) {
       if (prefs.reminderHour == 22 && prefs.reminderMinute == 0) {
         await prefs.setDailyReminder(
@@ -618,7 +591,6 @@ class _BooksScreenState extends State<BooksScreen> {
       } catch (_) {}
     }
 
-    // Show First-Install Welcome & Permission Setup if not completed yet
     if (!handledSet.contains('__onboarding_v1_done__')) {
       if (mounted) setState(() => _showOnboarding = true);
       return;
@@ -662,8 +634,6 @@ class _BooksScreenState extends State<BooksScreen> {
         return;
       }
 
-      // Even if the user cleared the 1st-of-the-month notification, automatically show
-      // the previous month's insights the first time they open the app in the new month!
       if (!handledSet.contains(markerKey)) {
         final prevMonthDate = DateTime(now.year, now.month - 1, 1);
         final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
@@ -742,7 +712,6 @@ class _BooksScreenState extends State<BooksScreen> {
           _loading = false;
         });
       }
-      // Refresh SMS in background without blocking the UI
       unawaited(_refreshSmsInbox());
     } catch (e) {
       AppLogger.instance.log('Book load error: $e', tag: 'ERROR');
@@ -1801,7 +1770,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // GOOGLE DRIVE CLOUD SYNC WITH 3-STAGE AUTOMATIC FALLBACK
+  // GOOGLE DRIVE CLOUD SYNC
   // ===========================================================================
   void _showProgressModal(String label) {
     showDialog(
@@ -1849,69 +1818,21 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
-    PlatformException? lastPlatformError;
-
-    // STAGE 1: Direct Android OAuth Client
     try {
       if (switchAccount) await _googleAuth.signOut();
       GoogleSignInAccount? user = _googleAuth.currentUser;
-      if (user == null && !switchAccount) {
-        user = await _googleAuth.signInSilently();
-      }
+      user ??= await _googleAuth.signInSilently();
       user ??= await _googleAuth.signIn();
-      if (user != null) {
-        await user.authHeaders;
-        await prefs.setDriveAccount(user.email);
-        return user;
-      } else {
-        return null;
-      }
-    } on PlatformException catch (e) {
-      lastPlatformError = e;
-      AppLogger.instance.log('Stage 1 PlatformException (${e.code}): ${e.message}', tag: 'WARN');
-    } catch (_) {}
 
-    // STAGE 2: Basic Email Sign-In -> requestScopes
-    try {
-      final stepAuth = GoogleSignIn(scopes: <String>['email']);
-      if (switchAccount) await stepAuth.signOut();
-      final user = await stepAuth.signIn();
-      if (user != null) {
-        await stepAuth.requestScopes(<String>[_driveAppDataScope]);
-        await user.authHeaders;
-        await prefs.setDriveAccount(user.email);
-        return user;
-      }
-    } on PlatformException catch (e) {
-      lastPlatformError = e;
-      AppLogger.instance.log('Stage 2 PlatformException (${e.code}): ${e.message}', tag: 'WARN');
-    } catch (_) {}
-
-    // STAGE 3: Web serverClientId Fallback
-    try {
-      final webAuth = GoogleSignIn(
-        scopes: <String>[_driveAppDataScope],
-        serverClientId: _webServerClientId,
-      );
-      if (switchAccount) await webAuth.signOut();
-      final user = await webAuth.signIn();
       if (user != null) {
         await user.authHeaders;
         await prefs.setDriveAccount(user.email);
         return user;
       }
-    } on PlatformException catch (e) {
-      lastPlatformError = e;
-      AppLogger.instance.log('Stage 3 PlatformException (${e.code}): ${e.message}', tag: 'ERROR');
-    } catch (_) {}
-
-    if (lastPlatformError != null) {
-      final diagnosis = AppLogger.explainPlayServicesCode(lastPlatformError.message ?? '', lastPlatformError.code);
+    } catch (e) {
+      AppLogger.instance.log('Sign-in error: $e', tag: 'ERROR');
       if (mounted) {
-        _showErrorModal(
-          'Google Sign-In Blocked (${lastPlatformError.code})',
-          'Google Play Services rejected the sign-in:\n${lastPlatformError.message ?? lastPlatformError.toString()}\n\n$diagnosis',
-        );
+        _showErrorModal('Google Sign-In Blocked', e.toString());
       }
     }
     return null;
@@ -2866,7 +2787,6 @@ class _BooksScreenState extends State<BooksScreen> {
         onFinished: () {
           setState(() => _showOnboarding = false);
           _initBackgroundTasks();
-          _loadBooks();
         },
       );
     }
