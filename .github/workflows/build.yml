@@ -637,6 +637,168 @@ jobs:
       
       - name: Generate App Icon
         run: dart run flutter_launcher_icons
+
+      - name: Generate Native Branded Launch Screen (Logo + FinTrax Title)
+        run: |
+          python3 -m pip install --quiet pillow
+          python3 - << 'EOF'
+          import os
+          from PIL import Image, ImageDraw, ImageFont
+
+          icon_candidates = [
+              "assets/icon/icon.png",
+              "assets/icon/app_icon.png",
+              "assets/icon.png",
+              "android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+          ]
+          icon_path = next((p for p in icon_candidates if os.path.exists(p)), None)
+
+          os.makedirs("android/app/src/main/res/drawable-nodpi", exist_ok=True)
+          os.makedirs("android/app/src/main/res/drawable-night-nodpi", exist_ok=True)
+
+          def make_splash_center(is_dark, out_path):
+              W, H = 720, 720
+              canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+              draw = ImageDraw.Draw(canvas)
+
+              icon_size = 240
+              if icon_path:
+                  ic = Image.open(icon_path).convert("RGBA").resize((icon_size, icon_size), Image.LANCZOS)
+                  mask = Image.new("L", (icon_size, icon_size), 0)
+                  mdraw = ImageDraw.Draw(mask)
+                  mdraw.rounded_rectangle((0, 0, icon_size, icon_size), radius=56, fill=255)
+                  canvas.paste(ic, ((W - icon_size) // 2, 165), mask)
+
+              bold_paths = [
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                  "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+              ]
+              reg_paths = [
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+              ]
+              bold_font_path = next((p for p in bold_paths if os.path.exists(p)), None)
+              reg_font_path = next((p for p in reg_paths if os.path.exists(p)), None)
+
+              font_bold = ImageFont.truetype(bold_font_path, 72) if bold_font_path else ImageFont.load_default()
+              font_reg = ImageFont.truetype(reg_font_path, 72) if reg_font_path else ImageFont.load_default()
+
+              fin_text = "Fin"
+              trax_text = "Trax"
+              fin_bbox = draw.textbbox((0, 0), fin_text, font=font_bold)
+              trax_bbox = draw.textbbox((0, 0), trax_text, font=font_reg)
+              fin_w = fin_bbox[2] - fin_bbox[0]
+              trax_w = trax_bbox[2] - trax_bbox[0]
+              total_w = fin_w + trax_w + 4
+
+              start_x = (W - total_w) // 2
+              text_y = 445
+
+              fin_color = (255, 255, 255, 255) if is_dark else (14, 23, 38, 255)
+              trax_color = (197, 160, 89, 255) if is_dark else (154, 119, 50, 255)
+
+              draw.text((start_x, text_y), fin_text, font=font_bold, fill=fin_color)
+              draw.text((start_x + fin_w + 4, text_y), trax_text, font=font_reg, fill=trax_color)
+              canvas.save(out_path, "PNG")
+
+          make_splash_center(False, "android/app/src/main/res/drawable-nodpi/splash_brand.png")
+          make_splash_center(True, "android/app/src/main/res/drawable-night-nodpi/splash_brand.png")
+          EOF
+
+          mkdir -p android/app/src/main/res/drawable
+          mkdir -p android/app/src/main/res/drawable-v21
+          mkdir -p android/app/src/main/res/drawable-night
+          mkdir -p android/app/src/main/res/drawable-night-v21
+          mkdir -p android/app/src/main/res/values
+          mkdir -p android/app/src/main/res/values-night
+          mkdir -p android/app/src/main/res/values-v31
+          mkdir -p android/app/src/main/res/values-night-v31
+
+          cat << 'EOF' > android/app/src/main/res/drawable/launch_background.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#F6F2EA"/>
+                  </shape>
+              </item>
+              <item>
+                  <bitmap
+                      android:gravity="center"
+                      android:src="@drawable/splash_brand" />
+              </item>
+          </layer-list>
+          EOF
+          cp android/app/src/main/res/drawable/launch_background.xml android/app/src/main/res/drawable-v21/launch_background.xml
+
+          cat << 'EOF' > android/app/src/main/res/drawable-night/launch_background.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+              <item>
+                  <shape android:shape="rectangle">
+                      <solid android:color="#07080B"/>
+                  </shape>
+              </item>
+              <item>
+                  <bitmap
+                      android:gravity="center"
+                      android:src="@drawable/splash_brand" />
+              </item>
+          </layer-list>
+          EOF
+          cp android/app/src/main/res/drawable-night/launch_background.xml android/app/src/main/res/drawable-night-v21/launch_background.xml
+
+          cat << 'EOF' > android/app/src/main/res/values/styles.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+              </style>
+              <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+              </style>
+          </resources>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/values-night/styles.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+              </style>
+              <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+              </style>
+          </resources>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/values-v31/styles.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+                  <item name="android:windowSplashScreenBackground">#F6F2EA</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_brand</item>
+              </style>
+              <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+              </style>
+          </resources>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/values-night-v31/styles.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+                  <item name="android:windowSplashScreenBackground">#07080B</item>
+                  <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_brand</item>
+              </style>
+              <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+                  <item name="android:windowBackground">@drawable/launch_background</item>
+              </style>
+          </resources>
+          EOF
         
       - name: Build Lightweight Split APK
         run: flutter build apk --release --split-per-abi
