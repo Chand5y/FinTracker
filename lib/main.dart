@@ -20,6 +20,138 @@ void main() {
   );
 }
 
+// ===========================================================================
+// REUSABLE FINTRAX BRAND LOGO ICON & LAUNCH SPLASH SCREEN
+// ===========================================================================
+class FinTraxLogoIcon extends StatelessWidget {
+  final double size;
+  const FinTraxLogoIcon({Key? key, this.size = 84}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF16243E), Color(0xFF0B1322)],
+        ),
+        borderRadius: BorderRadius.circular(size * 0.26),
+        border: Border.all(
+          color: AppConstants.goldAccent.withOpacity(0.55),
+          width: 1.6,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: CustomPaint(
+        painter: _FinTraxMonogramPainter(),
+      ),
+    );
+  }
+}
+
+class _FinTraxMonogramPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    final goldPaint = Paint()
+      ..color = AppConstants.goldAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.068
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    // Stylized 'F' and 'T' monogram matching the FinTrax app icon
+    final fPath = Path()
+      ..moveTo(w * 0.26, h * 0.72)
+      ..lineTo(w * 0.26, h * 0.38)
+      ..quadraticBezierTo(w * 0.26, h * 0.27, w * 0.38, h * 0.27)
+      ..lineTo(w * 0.50, h * 0.27);
+    canvas.drawPath(fPath, goldPaint);
+
+    // Middle crossbar of F
+    canvas.drawLine(
+      Offset(w * 0.26, h * 0.49),
+      Offset(w * 0.45, h * 0.49),
+      goldPaint,
+    );
+
+    // Stylized 'T' with upward financial arrow tip
+    final tPath = Path()
+      ..moveTo(w * 0.46, h * 0.27)
+      ..lineTo(w * 0.76, h * 0.27);
+    canvas.drawPath(tPath, goldPaint);
+
+    canvas.drawLine(
+      Offset(w * 0.61, h * 0.27),
+      Offset(w * 0.61, h * 0.72),
+      goldPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class FinTraxSplashScreen extends StatelessWidget {
+  const FinTraxSplashScreen({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    final Color finColor = isDark ? Colors.white : const Color(0xFF0E1726);
+    final Color traxColor = isDark ? AppConstants.goldAccent : AppConstants.goldDarkText;
+
+    return Scaffold(
+      backgroundColor: isDark ? AppConstants.bgDark : AppConstants.bgLight,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const FinTraxLogoIcon(size: 88),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  'Fin',
+                  style: TextStyle(
+                    color: finColor,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 30,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                Text(
+                  'Trax',
+                  style: TextStyle(
+                    color: traxColor,
+                    fontWeight: FontWeight.w300,
+                    fontSize: 30,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class FintrackApp extends StatelessWidget {
   const FintrackApp({Key? key}) : super(key: key);
 
@@ -125,23 +257,24 @@ class _AppLockGateState extends State<AppLockGate> {
 
   bool _unlocked = false;
   bool _promptTriggered = false;
-  bool _bypassInitWait = false;
+  bool _splashDone = false;
   bool _initialLockStateChecked = false;
-  Timer? _initWatchdog;
+  Timer? _splashTimer;
 
   @override
   void initState() {
     super.initState();
-    _initWatchdog = Timer(const Duration(milliseconds: 700), () {
-      if (mounted && !_bypassInitWait) {
-        setState(() => _bypassInitWait = true);
+    // Show the branded FinTrax logo splash screen briefly on launch
+    _splashTimer = Timer(const Duration(milliseconds: 550), () {
+      if (mounted) {
+        setState(() => _splashDone = true);
       }
     });
   }
 
   @override
   void dispose() {
-    _initWatchdog?.cancel();
+    _splashTimer?.cancel();
     super.dispose();
   }
 
@@ -165,13 +298,11 @@ class _AppLockGateState extends State<AppLockGate> {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    if (!themeProvider.isInitialized && !_bypassInitWait) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (!themeProvider.isInitialized || !_splashDone) {
+      return const FinTraxSplashScreen();
     }
 
-    // Check lock status once at cold start so toggling App Lock ON in Settings
-    // does not lock out the active session or recreate BooksScreen.
-    if (!_initialLockStateChecked && (themeProvider.isInitialized || _bypassInitWait)) {
+    if (!_initialLockStateChecked) {
       _initialLockStateChecked = true;
       if (!themeProvider.appLockEnabled) {
         _unlocked = true;
@@ -198,16 +329,8 @@ class _AppLockGateState extends State<AppLockGate> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: AppConstants.iconNavy,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 1.5),
-                  ),
-                  child: const Icon(Icons.fingerprint_rounded, color: AppConstants.goldAccent, size: 48),
-                ),
-                const SizedBox(height: 24),
+                const FinTraxLogoIcon(size: 84),
+                const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
