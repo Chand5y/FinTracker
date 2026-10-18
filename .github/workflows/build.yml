@@ -45,7 +45,7 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrax --org com.chandsy .
 
-      - name: Configure Native Bridge & ProGuard Rules
+      - name: Configure Native Bridge & Disable R8 Stripping
         run: |
           INSTALLED_NDK=$(ls -1 $ANDROID_HOME/ndk | sort -V | tail -n 1)
           echo "Using pre-installed NDK: $INSTALLED_NDK"
@@ -54,19 +54,26 @@ jobs:
           sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="false" android:fullBackupOnly="false"/' android/app/src/main/AndroidManifest.xml
           sed -i 's/<\/application>/    <receiver android:name=".ReminderReceiver" android:exported="false"\/>\n    <\/application>/' android/app/src/main/AndroidManifest.xml
 
+          # Disable R8 minification & resource shrinking in Gradle so kotlin.Result & plugins are never stripped
+          if [ -f "android/app/build.gradle.kts" ]; then
+            sed -i 's/buildTypes {/buildTypes {\n        getByName("release") {\n            isMinifyEnabled = false\n            isShrinkResources = false\n        }/g' android/app/build.gradle.kts || true
+          fi
+          if [ -f "android/app/build.gradle" ]; then
+            sed -i 's/buildTypes {/buildTypes {\n        release {\n            minifyEnabled false\n            shrinkResources false\n        }/g' android/app/build.gradle || true
+          fi
+          echo "android.enableR8.fullMode=false" >> android/gradle.properties
+
           cat << 'EOF' > android/app/proguard-rules.pro
-          -keep class io.flutter.app.** { *; }
-          -keep class io.flutter.plugin.** { *; }
-          -keep class io.flutter.plugins.** { *; }
-          -keep class io.flutter.util.** { *; }
-          -keep class io.flutter.view.** { *; }
+          -dontshrink
+          -dontoptimize
+          -dontobfuscate
+          -keep class kotlin.** { *; }
+          -keep class kotlinx.** { *; }
           -keep class io.flutter.** { *; }
-          -keep class io.flutter.embedding.** { *; }
+          -keep class io.flutter.plugins.** { *; }
           -keep class com.google.android.gms.** { *; }
-          -keep class kotlin.coroutines.** { *; }
-          -keep class kotlinx.coroutines.** { *; }
-          -dontwarn io.flutter.embedding.**
-          -dontwarn io.flutter.plugins.**
+          -dontwarn kotlin.**
+          -dontwarn io.flutter.**
           EOF
 
           mkdir -p android/app/src/main/kotlin/com/chandsy/fintrax
@@ -422,6 +429,30 @@ jobs:
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
                       when (call.method) {
+                          "readAppPrefs" -> {
+                              val sp = getSharedPreferences("FinTraxNativePrefs", Context.MODE_PRIVATE)
+                              val all = mutableMapOf<String, Any?>()
+                              for ((k, v) in sp.all) {
+                                  all[k] = v
+                              }
+                              result.success(all)
+                          }
+                          "writeAppPref" -> {
+                              val key = call.argument<String>("key") ?: ""
+                              val value = call.argument<Any>("value")
+                              if (key.isNotEmpty()) {
+                                  val editor = getSharedPreferences("FinTraxNativePrefs", Context.MODE_PRIVATE).edit()
+                                  when (value) {
+                                      is Boolean -> editor.putBoolean(key, value)
+                                      is Int -> editor.putInt(key, value)
+                                      is Long -> editor.putLong(key, value.toInt())
+                                      is String -> editor.putString(key, value)
+                                      null -> editor.remove(key)
+                                  }
+                                  editor.apply()
+                              }
+                              result.success(true)
+                          }
                           "getApkSignatureInfo" -> {
                               result.success(mapOf(
                                   "packageName" to packageName,
@@ -607,8 +638,8 @@ jobs:
       - name: Generate App Icon
         run: dart run flutter_launcher_icons
         
-      - name: Build Lightweight Split APK (No R8 Plugin Stripping)
-        run: flutter build apk --release --split-per-abi --no-shrink
+      - name: Build Lightweight Split APK
+        run: flutter build apk --release --split-per-abi
 
       - name: Sign APK with Permanent Key & Verify SHA-1
         run: |
