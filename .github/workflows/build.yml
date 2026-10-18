@@ -378,6 +378,20 @@ jobs:
               private var pendingPdfBytes: ByteArray? = null
               private var pendingInsightOpen: Boolean = false
 
+              override fun onCreate(savedInstanceState: android.os.Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  if (intent?.getBooleanExtra("open_monthly_insights", false) == true) {
+                      pendingInsightOpen = true
+                  }
+              }
+
+              override fun onNewIntent(intent: Intent) {
+                  super.onNewIntent(intent)
+                  if (intent.getBooleanExtra("open_monthly_insights", false)) {
+                      pendingInsightOpen = true
+                  }
+              }
+
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
                   super.configureFlutterEngine(flutterEngine)
                   MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
@@ -568,19 +582,19 @@ jobs:
       - name: Generate App Icon
         run: dart run flutter_launcher_icons
         
-      - name: Build Lightweight Split APK
-        run: flutter build apk --release --split-per-abi
+      - name: Build Single Universal APK
+        run: flutter build apk --release
 
-      - name: Sign APK with Permanent Key & Verify SHA-1
+      - name: Sign APK with Permanent Key
         run: |
           APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-release.apk
           echo "=========================================================="
-          $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-release.apk
           echo "=========================================================="
       
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: fintrax-release
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
