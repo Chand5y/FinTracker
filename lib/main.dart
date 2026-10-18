@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -94,7 +95,11 @@ class FintrackApp extends StatelessWidget {
             : AppConstants.goldAccent.withOpacity(isDark ? 0.22 : 0.18),
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
-            return IconThemeData(color: useDynamic ? scheme.onSecondaryContainer : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText));
+            return IconThemeData(
+              color: useDynamic
+                  ? scheme.onSecondaryContainer
+                  : (isDark ? AppConstants.goldAccent : AppConstants.goldDarkText),
+            );
           }
           return IconThemeData(color: isDark ? Colors.grey[400] : Colors.grey[600]);
         }),
@@ -120,26 +125,47 @@ class _AppLockGateState extends State<AppLockGate> {
 
   bool _unlocked = false;
   bool _promptTriggered = false;
+  bool _bypassInitWait = false;
+  Timer? _initWatchdog;
+
+  @override
+  void initState() {
+    super.initState();
+    // Safety watchdog: never allow the startup spinner to hang longer than 700ms
+    _initWatchdog = Timer(const Duration(milliseconds: 700), () {
+      if (mounted && !_bypassInitWait) {
+        setState(() => _bypassInitWait = true);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _initWatchdog?.cancel();
+    super.dispose();
+  }
 
   Future<void> _triggerBiometricUnlock() async {
     try {
-      final bool isSecure = await _channel.invokeMethod('isDeviceSecure') ?? false;
+      final bool isSecure = await _channel.invokeMethod<bool>('isDeviceSecure') ?? false;
       if (!isSecure) {
         if (mounted) setState(() => _unlocked = true);
         return;
       }
-      final bool ok = await _channel.invokeMethod('authenticateDevice') ?? false;
+      final bool ok = await _channel.invokeMethod<bool>('authenticateDevice') ?? false;
       if (ok && mounted) {
         HapticFeedback.mediumImpact();
         setState(() => _unlocked = true);
       }
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _unlocked = true);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    if (!themeProvider.isInitialized) {
+    if (!themeProvider.isInitialized && !_bypassInitWait) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
@@ -176,7 +202,14 @@ class _AppLockGateState extends State<AppLockGate> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text('Fin', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF0E1726))),
+                    Text(
+                      'Fin',
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : const Color(0xFF0E1726),
+                      ),
+                    ),
                     Text('Trax', style: TextStyle(fontSize: 30, fontWeight: FontWeight.w300, color: gold)),
                   ],
                 ),
