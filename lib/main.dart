@@ -126,12 +126,12 @@ class _AppLockGateState extends State<AppLockGate> {
   bool _unlocked = false;
   bool _promptTriggered = false;
   bool _bypassInitWait = false;
+  bool _initialLockStateChecked = false;
   Timer? _initWatchdog;
 
   @override
   void initState() {
     super.initState();
-    // Safety watchdog: never allow the startup spinner to hang longer than 700ms
     _initWatchdog = Timer(const Duration(milliseconds: 700), () {
       if (mounted && !_bypassInitWait) {
         setState(() => _bypassInitWait = true);
@@ -167,6 +167,15 @@ class _AppLockGateState extends State<AppLockGate> {
     final themeProvider = Provider.of<ThemeProvider>(context);
     if (!themeProvider.isInitialized && !_bypassInitWait) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    // Check lock status once at cold start so toggling App Lock ON in Settings
+    // does not lock out the active session or recreate BooksScreen.
+    if (!_initialLockStateChecked && (themeProvider.isInitialized || _bypassInitWait)) {
+      _initialLockStateChecked = true;
+      if (!themeProvider.appLockEnabled) {
+        _unlocked = true;
+      }
     }
 
     if (!themeProvider.appLockEnabled || _unlocked) {
