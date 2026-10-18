@@ -191,71 +191,6 @@ class DebugLogsScreen extends StatelessWidget {
 }
 
 // ===========================================================================
-// SELF-CONTAINED BRAND LOGO BADGE FOR ONBOARDING
-// ===========================================================================
-class _FinTraxBrandBadge extends StatelessWidget {
-  final double size;
-  const _FinTraxBrandBadge({this.size = 62});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      margin: const EdgeInsets.only(top: 4),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF16243E), Color(0xFF0B1322)],
-        ),
-        borderRadius: BorderRadius.circular(size * 0.26),
-        border: Border.all(color: AppConstants.goldAccent.withOpacity(0.55), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.22),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: CustomPaint(painter: _MonogramLogoPainter()),
-    );
-  }
-}
-
-class _MonogramLogoPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final w = size.width;
-    final h = size.height;
-    final paint = Paint()
-      ..color = AppConstants.goldAccent
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = w * 0.068
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final fPath = Path()
-      ..moveTo(w * 0.26, h * 0.72)
-      ..lineTo(w * 0.26, h * 0.38)
-      ..quadraticBezierTo(w * 0.26, h * 0.27, w * 0.38, h * 0.27)
-      ..lineTo(w * 0.50, h * 0.27);
-    canvas.drawPath(fPath, paint);
-    canvas.drawLine(Offset(w * 0.26, h * 0.49), Offset(w * 0.45, h * 0.49), paint);
-
-    final tPath = Path()
-      ..moveTo(w * 0.46, h * 0.27)
-      ..lineTo(w * 0.76, h * 0.27);
-    canvas.drawPath(tPath, paint);
-    canvas.drawLine(Offset(w * 0.61, h * 0.27), Offset(w * 0.61, h * 0.72), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// ===========================================================================
 // FIRST-INSTALL WELCOME & FRIENDLY PERMISSION SETUP FLOW
 // ===========================================================================
 class WelcomeSetupScreen extends StatefulWidget {
@@ -514,7 +449,27 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                         ? Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Center(child: _FinTraxBrandBadge(size: 62)),
+                              Center(
+                                child: Container(
+                                  width: 62,
+                                  height: 62,
+                                  margin: const EdgeInsets.only(top: 4),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(15),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withOpacity(0.18),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(15),
+                                    child: Image.asset('logo.png', width: 62, height: 62, fit: BoxFit.cover),
+                                  ),
+                                ),
+                              ),
                               const SizedBox(height: 12),
                               const Center(
                                 child: Text(
