@@ -36,9 +36,19 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   late TextEditingController _amountController;
   late TextEditingController _nameController;
+  late TextEditingController _notesController;
 
   List<Map<String, dynamic>> _otherBooks = [];
   final Set<int> _selectedExtraBookIds = <int>{};
+
+  List<Map<String, String>> get _allCategories {
+    final list = List<Map<String, String>>.from(AppConstants.categories);
+    final hasEmi = list.any((c) => (c['name'] ?? '').toLowerCase() == 'emi');
+    if (!hasEmi) {
+      list.add({'name': 'EMI', 'emoji': '🏦'});
+    }
+    return list;
+  }
 
   @override
   void initState() {
@@ -48,6 +58,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       text: widget.existingTransaction != null ? widget.existingTransaction!.amount.toStringAsFixed(0) : '',
     );
     _nameController = TextEditingController(text: widget.existingTransaction?.name ?? '');
+    _notesController = TextEditingController(
+      text: widget.isSmsDraft ? '' : (widget.existingTransaction?.notes ?? ''),
+    );
     final existingCat = widget.existingTransaction?.category ?? '';
     _selectedCategory = existingCat.isNotEmpty ? existingCat : null;
     _paymentMode = widget.existingTransaction?.paymentMode ?? 'Cash';
@@ -57,6 +70,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _imagePath = widget.existingTransaction?.imagePath ?? '';
     _smsText = widget.existingTransaction?.effectiveSmsText ?? '';
     _loadOtherBooks();
+  }
+
+  @override
+  void dispose() {
+    _amountController.dispose();
+    _nameController.dispose();
+    _notesController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadOtherBooks() async {
@@ -71,7 +92,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   String _getEmojiForCategory(String? catName) {
     if (catName == null || catName.isEmpty) return '🏷️';
-    for (final c in AppConstants.categories) {
+    for (final c in _allCategories) {
       if (c['name'] == catName) return c['emoji'] ?? '🏷️';
     }
     return '🏷️';
@@ -80,6 +101,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   void _openCategoryPicker(bool isDark) {
     HapticFeedback.lightImpact();
     final scheme = Theme.of(context).colorScheme;
+    final categories = _allCategories;
 
     showModalBottomSheet(
       context: context,
@@ -136,7 +158,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                           Navigator.pop(sheetCtx);
                         },
                       ),
-                      ...AppConstants.categories.map((c) {
+                      ...categories.map((c) {
                         final String name = c['name']!;
                         final String emoji = c['emoji']!;
                         final bool isSelected = _selectedCategory == name;
@@ -352,7 +374,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       amount: parsedAmount,
       name: _nameController.text.trim().isEmpty ? 'Untitled Entry' : _nameController.text.trim(),
       category: _selectedCategory ?? '',
-      notes: _smsText,
+      notes: _notesController.text.trim(),
       smsBody: _smsText,
       date: widget.existingTransaction?.date ?? DateTime.now(),
       currency: AppConstants.defaultCurrency,
@@ -373,7 +395,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (mounted) Navigator.pop(context, true);
   }
 
-  Widget _buildSelectorCard({
+  Widget _buildCompactSelectorCard({
     required bool isDark,
     required String label,
     required String valueText,
@@ -391,37 +413,42 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
           child: Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 34,
+                height: 34,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(9),
                 ),
-                child: Text(emoji, style: const TextStyle(fontSize: 19)),
+                child: Text(emoji, style: const TextStyle(fontSize: 16)),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 9),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       label,
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: Colors.grey[500]),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Colors.grey[500]),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       valueText,
-                      style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
               ),
-              Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey[500]),
+              Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Colors.grey[500]),
             ],
           ),
         ),
@@ -596,7 +623,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
               validator: (val) => (val == null || val.trim().isEmpty) ? 'Enter an amount' : null,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             TextFormField(
               controller: _nameController,
               textCapitalization: TextCapitalization.sentences,
@@ -607,21 +634,45 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
-            const SizedBox(height: 16),
-            _buildSelectorCard(
-              isDark: isDark,
-              label: 'Category (Optional)',
-              valueText: _selectedCategory ?? 'None',
-              emoji: _getEmojiForCategory(_selectedCategory),
-              onTap: () => _openCategoryPicker(isDark),
+            const SizedBox(height: 14),
+            // Side-by-side Category & Payment Method row
+            Row(
+              children: [
+                Expanded(
+                  child: _buildCompactSelectorCard(
+                    isDark: isDark,
+                    label: 'Category',
+                    valueText: _selectedCategory ?? 'None',
+                    emoji: _getEmojiForCategory(_selectedCategory),
+                    onTap: () => _openCategoryPicker(isDark),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildCompactSelectorCard(
+                    isDark: isDark,
+                    label: 'Payment Mode',
+                    valueText: _paymentMode,
+                    emoji: AppConstants.paymentModeEmojis[_paymentMode] ?? '💳',
+                    onTap: () => _openPaymentModePicker(isDark),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            _buildSelectorCard(
-              isDark: isDark,
-              label: 'Payment Method',
-              valueText: _paymentMode,
-              emoji: AppConstants.paymentModeEmojis[_paymentMode] ?? '💳',
-              onTap: () => _openPaymentModePicker(isDark),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _notesController,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 1,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: 'Notes (Optional)',
+                hintText: 'Add any extra details about this payment...',
+                prefixIcon: const Icon(Icons.sticky_note_2_outlined, size: 20),
+                filled: true,
+                fillColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+              ),
             ),
             if (_smsText.isNotEmpty) _buildPermanentSmsCard(isDark),
             _buildMultiBookSelectorCard(isDark),
@@ -664,36 +715,19 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     color: isDark ? const Color(0xFF323642) : const Color(0xFFCBD5E1),
                     width: 1.5,
                   ),
-                  boxShadow: [
-                    if (!isDark)
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.04),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                  ],
                 ),
                 child: Stack(
                   alignment: Alignment.topRight,
                   children: [
                     GestureDetector(
                       onTap: _openImageFullScreen,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(11),
-                          border: Border.all(
-                            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: Image.file(
-                            File(_imagePath),
-                            height: 170,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                          ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.file(
+                          File(_imagePath),
+                          height: 170,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
                         ),
                       ),
                     ),
@@ -715,7 +749,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               const SizedBox(height: 6),
               Text('Tap image to view full screen', style: TextStyle(fontSize: 11, color: Colors.grey[500]), textAlign: TextAlign.center),
             ],
-            const SizedBox(height: 32),
+            const SizedBox(height: 28),
             FilledButton(
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
