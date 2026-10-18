@@ -6,6 +6,181 @@ import '../core/constants.dart';
 import '../data/database_helper.dart';
 import '../data/transaction_model.dart';
 
+// ===========================================================================
+// SHARED BANK ICON, MERCHANT ICON & AUTO-CATEGORIZATION HELPER
+// ===========================================================================
+class FinTraxBrandHelper {
+  static const List<Map<String, String>> paymentMethods = [
+    {'name': 'Cash', 'emoji': '💵', 'asset': ''},
+    {'name': 'UPI', 'emoji': '📱', 'asset': ''},
+    {'name': 'Airtel', 'emoji': '🏦', 'asset': 'assets/Icons/airtel.png'},
+    {'name': 'Utkarsh SFBL', 'emoji': '💳', 'asset': 'assets/Icons/Utkarsh.png'},
+    {'name': 'Kotak Bank', 'emoji': '🏦', 'asset': 'assets/Icons/kotak.png'},
+    {'name': 'SBI', 'emoji': '🏦', 'asset': 'assets/Icons/sbi.png'},
+    {'name': 'ICICI Bank', 'emoji': '🏦', 'asset': 'assets/Icons/icici.png'},
+    {'name': 'Bank of Baroda', 'emoji': '🏦', 'asset': 'assets/Icons/Baroda.png'},
+    {'name': 'IPPB', 'emoji': '🏦', 'asset': 'assets/Icons/ippb.png'},
+    {'name': 'Google Pay', 'emoji': '📱', 'asset': 'assets/Icons/Gpay.png'},
+    {'name': 'PhonePe', 'emoji': '📱', 'asset': 'assets/Icons/PhonePe.png'},
+    {'name': 'Paytm', 'emoji': '📱', 'asset': 'assets/Icons/paytm.png'},
+    {'name': 'SuperMoney', 'emoji': '⚡', 'asset': 'assets/Icons/SuperMoney.png'},
+    {'name': 'Slice', 'emoji': '💳', 'asset': 'assets/Icons/slice.png'},
+    {'name': 'Navi', 'emoji': '📱', 'asset': 'assets/Icons/navi.png'},
+    {'name': 'PayPal', 'emoji': '🌐', 'asset': 'assets/Icons/paypal.png'},
+    {'name': 'JioPay', 'emoji': '📱', 'asset': 'assets/Icons/jio.png'},
+    {'name': 'Card', 'emoji': '💳', 'asset': ''},
+    {'name': 'Bank Transfer', 'emoji': '🏦', 'asset': ''},
+    {'name': 'Online', 'emoji': '🌐', 'asset': ''},
+  ];
+
+  static String detectPaymentMethod({
+    String currentMode = '',
+    String smsBody = '',
+    String sender = '',
+  }) {
+    final combined = '$sender $smsBody $currentMode'.toLowerCase();
+
+    if (combined.contains('airbnk') || combined.contains('airtel payments bank') || combined.contains('airtel')) {
+      return 'Airtel';
+    }
+    if (combined.contains('utkspr') || combined.contains('utkarsh') || combined.contains('supercard')) {
+      return 'Utkarsh SFBL';
+    }
+    if (combined.contains('kotak') || combined.contains('kbankt')) {
+      return 'Kotak Bank';
+    }
+    if (combined.contains('state bank') || RegExp(r'\bsbi\b').hasMatch(combined) || combined.contains('sbipsg')) {
+      return 'SBI';
+    }
+    if (combined.contains('icici')) {
+      return 'ICICI Bank';
+    }
+    if (combined.contains('baroda') || RegExp(r'\bbob\b').hasMatch(combined)) {
+      return 'Bank of Baroda';
+    }
+    if (combined.contains('ippb') || combined.contains('india post')) {
+      return 'IPPB';
+    }
+    if (combined.contains('supermoney') || combined.contains('super.money')) {
+      return 'SuperMoney';
+    }
+    if (combined.contains('slice')) {
+      return 'Slice';
+    }
+    if (combined.contains('navi')) {
+      return 'Navi';
+    }
+    if (combined.contains('phonepe')) {
+      return 'PhonePe';
+    }
+    if (combined.contains('gpay') || combined.contains('google pay')) {
+      return 'Google Pay';
+    }
+    if (combined.contains('paytm')) {
+      return 'Paytm';
+    }
+    if (combined.contains('paypal')) {
+      return 'PayPal';
+    }
+    if (combined.contains('jiopay')) {
+      return 'JioPay';
+    }
+
+    if (currentMode.trim().isNotEmpty) {
+      return currentMode.trim();
+    }
+    return 'Cash';
+  }
+
+  static String? getPaymentIconAsset(String paymentMode, {String smsBody = '', String sender = ''}) {
+    final resolved = detectPaymentMethod(currentMode: paymentMode, smsBody: smsBody, sender: sender);
+    for (final item in paymentMethods) {
+      if (item['name']!.toLowerCase() == resolved.toLowerCase()) {
+        final asset = item['asset'] ?? '';
+        return asset.isNotEmpty ? asset : null;
+      }
+    }
+    return null;
+  }
+
+  static String getPaymentEmoji(String paymentMode) {
+    for (final item in paymentMethods) {
+      if (item['name']!.toLowerCase() == paymentMode.toLowerCase()) {
+        return item['emoji'] ?? '💳';
+      }
+    }
+    return AppConstants.paymentModeEmojis[paymentMode] ?? '💳';
+  }
+
+  static String? getMerchantIconAsset(String name, {String smsBody = ''}) {
+    final text = '$name $smsBody'.toLowerCase();
+    if (text.contains('flipkart')) return 'assets/Icons/Flipkart.png';
+    if (text.contains('amazon') || text.contains('amzn')) return 'assets/Icons/amazon.png';
+    if (text.contains('myntra')) return 'assets/Icons/Myntra.png';
+    if (text.contains('meesho')) return 'assets/Icons/meesho.png';
+    if (text.contains('swiggy') || text.contains('instamart')) return 'assets/Icons/swiggy.png';
+    if (text.contains('zomato') || text.contains('blinkit')) return 'assets/Icons/zomato.png';
+    if (text.contains('jio')) return 'assets/Icons/jio.png';
+    if (text.contains('airtel')) return 'assets/Icons/airtel.png';
+    return null;
+  }
+
+  static String? detectCategory(String name, {String smsBody = '', String currentCategory = ''}) {
+    if (currentCategory.trim().isNotEmpty) return currentCategory.trim();
+    final text = '$name $smsBody'.toLowerCase();
+
+    // Check Swiggy Instamart & E-commerce first so Instamart maps to Shopping
+    if (text.contains('instamart') ||
+        text.contains('flipkart') ||
+        text.contains('amazon') ||
+        text.contains('amzn') ||
+        text.contains('meesho') ||
+        text.contains('myntra') ||
+        text.contains('ajio') ||
+        text.contains('nykaa')) {
+      return 'Shopping';
+    }
+
+    // Food delivery & dining apps
+    if (text.contains('zomato') ||
+        text.contains('swiggy') ||
+        text.contains('dominos') ||
+        text.contains("domino's") ||
+        text.contains('kfc') ||
+        text.contains('mcdonald') ||
+        text.contains('pizza hut') ||
+        text.contains('burger king')) {
+      return 'Food';
+    }
+
+    return null;
+  }
+
+  static Widget buildIconBadge({
+    required String? assetPath,
+    required String fallbackEmoji,
+    double size = 20,
+    double borderRadius = 6,
+  }) {
+    if (assetPath != null && assetPath.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(borderRadius),
+        child: Image.asset(
+          assetPath,
+          width: size,
+          height: size,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78)),
+        ),
+      );
+    }
+    return Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78));
+  }
+}
+
+// ===========================================================================
+// ADD / EDIT TRANSACTION SCREEN
+// ===========================================================================
 class AddTransactionScreen extends StatefulWidget {
   final int bookId;
   final String type;
@@ -47,9 +222,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   List<Map<String, String>> get _allCategories {
     final list = List<Map<String, String>>.from(AppConstants.categories);
-    final hasEmi = list.any((c) => (c['name'] ?? '').toLowerCase() == 'emi');
-    if (!hasEmi) {
+    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'emi')) {
       list.add({'name': 'EMI', 'emoji': '🏦'});
+    }
+    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'food')) {
+      list.add({'name': 'Food', 'emoji': '🍔'});
+    }
+    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'shopping')) {
+      list.add({'name': 'Shopping', 'emoji': '🛍️'});
     }
     return list;
   }
@@ -66,19 +246,39 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _notesController = TextEditingController(
       text: widget.isSmsDraft ? '' : (widget.existingTransaction?.notes ?? ''),
     );
-    final existingCat = widget.existingTransaction?.category ?? '';
-    _selectedCategory = existingCat.isNotEmpty ? existingCat : null;
-    _paymentMode = widget.existingTransaction?.paymentMode ?? 'Cash';
-    if (!AppConstants.paymentModes.contains(_paymentMode)) {
-      _paymentMode = 'Cash';
-    }
-    _imagePath = widget.existingTransaction?.imagePath ?? '';
+
     _smsText = widget.existingTransaction?.effectiveSmsText ?? '';
+    final existingCat = widget.existingTransaction?.category ?? '';
+    _selectedCategory = FinTraxBrandHelper.detectCategory(
+      _nameController.text,
+      smsBody: _smsText,
+      currentCategory: existingCat,
+    );
+
+    final initialMode = widget.existingTransaction?.paymentMode ?? 'Cash';
+    _paymentMode = FinTraxBrandHelper.detectPaymentMethod(
+      currentMode: initialMode,
+      smsBody: _smsText,
+      sender: _nameController.text,
+    );
+
+    _imagePath = widget.existingTransaction?.imagePath ?? '';
+    _nameController.addListener(_onMerchantNameChanged);
     _loadOtherBooks();
+  }
+
+  void _onMerchantNameChanged() {
+    if (_selectedCategory == null || _selectedCategory!.isEmpty) {
+      final autoCat = FinTraxBrandHelper.detectCategory(_nameController.text, smsBody: _smsText);
+      if (autoCat != null && mounted) {
+        setState(() => _selectedCategory = autoCat);
+      }
+    }
   }
 
   @override
   void dispose() {
+    _nameController.removeListener(_onMerchantNameChanged);
     _amountController.dispose();
     _nameController.dispose();
     _notesController.dispose();
@@ -98,7 +298,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String _getEmojiForCategory(String? catName) {
     if (catName == null || catName.isEmpty) return '🏷️';
     for (final c in _allCategories) {
-      if (c['name'] == catName) return c['emoji'] ?? '🏷️';
+      if (c['name']!.toLowerCase() == catName.toLowerCase()) return c['emoji'] ?? '🏷️';
     }
     return '🏷️';
   }
@@ -158,10 +358,120 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     }
   }
 
+  Widget _buildTwoColumnGridTile({
+    required bool isDark,
+    required Widget leadingIcon,
+    required String title,
+    required bool isSelected,
+    required Color accentColor,
+    required VoidCallback onTap,
+  }) {
+    final Color cardBg = isSelected
+        ? accentColor.withOpacity(isDark ? 0.20 : 0.12)
+        : (isDark ? const Color(0xFF1A1C22) : const Color(0xFFF8FAFC));
+
+    final Color borderColor = isSelected
+        ? accentColor
+        : (isDark ? AppConstants.borderDark : AppConstants.borderLight);
+
+    return Material(
+      color: cardBg,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(13),
+        side: BorderSide(color: borderColor, width: isSelected ? 1.4 : 1.0),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(13),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.black.withOpacity(0.35) : Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: leadingIcon,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (isSelected)
+                Icon(Icons.check_circle_rounded, color: accentColor, size: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _openCategoryPicker(bool isDark) {
     HapticFeedback.lightImpact();
     final scheme = Theme.of(context).colorScheme;
-    final categories = _allCategories;
+    final options = <Map<String, String?>>[
+      {'name': null, 'label': 'None', 'emoji': '🚫'},
+      ..._allCategories.map((c) => {'name': c['name'], 'label': c['name'], 'emoji': c['emoji']}),
+    ];
+
+    final rows = <Widget>[];
+    for (int i = 0; i < options.length; i += 2) {
+      final first = options[i];
+      final second = (i + 1 < options.length) ? options[i + 1] : null;
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildTwoColumnGridTile(
+                  isDark: isDark,
+                  leadingIcon: Text(first['emoji'] ?? '🏷️', style: const TextStyle(fontSize: 15)),
+                  title: first['label'] ?? 'None',
+                  isSelected: _selectedCategory == first['name'],
+                  accentColor: scheme.primary,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _selectedCategory = first['name']);
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: second != null
+                    ? _buildTwoColumnGridTile(
+                        isDark: isDark,
+                        leadingIcon: Text(second['emoji'] ?? '🏷️', style: const TextStyle(fontSize: 15)),
+                        title: second['label'] ?? '',
+                        isSelected: _selectedCategory == second['name'],
+                        accentColor: scheme.primary,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _selectedCategory = second['name']);
+                          Navigator.pop(context);
+                        },
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     showModalBottomSheet(
       context: context,
@@ -188,11 +498,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Select Category', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                      const Text('Select Category', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
                         onPressed: () => Navigator.pop(sheetCtx),
@@ -205,37 +515,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(14),
                     shrinkWrap: true,
-                    children: [
-                      _buildPickerOptionCard(
-                        isDark: isDark,
-                        emoji: '🚫',
-                        title: 'None (No Category)',
-                        isSelected: _selectedCategory == null,
-                        accentColor: scheme.primary,
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(() => _selectedCategory = null);
-                          Navigator.pop(sheetCtx);
-                        },
-                      ),
-                      ...categories.map((c) {
-                        final String name = c['name']!;
-                        final String emoji = c['emoji']!;
-                        final bool isSelected = _selectedCategory == name;
-                        return _buildPickerOptionCard(
-                          isDark: isDark,
-                          emoji: emoji,
-                          title: name,
-                          isSelected: isSelected,
-                          accentColor: scheme.primary,
-                          onTap: () {
-                            HapticFeedback.selectionClick();
-                            setState(() => _selectedCategory = name);
-                            Navigator.pop(sheetCtx);
-                          },
-                        );
-                      }),
-                    ],
+                    children: rows,
                   ),
                 ),
               ],
@@ -249,6 +529,61 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   void _openPaymentModePicker(bool isDark) {
     HapticFeedback.lightImpact();
     final scheme = Theme.of(context).colorScheme;
+    const methods = FinTraxBrandHelper.paymentMethods;
+
+    final rows = <Widget>[];
+    for (int i = 0; i < methods.length; i += 2) {
+      final first = methods[i];
+      final second = (i + 1 < methods.length) ? methods[i + 1] : null;
+      rows.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildTwoColumnGridTile(
+                  isDark: isDark,
+                  leadingIcon: FinTraxBrandHelper.buildIconBadge(
+                    assetPath: first['asset'],
+                    fallbackEmoji: first['emoji'] ?? '💳',
+                    size: 20,
+                  ),
+                  title: first['name']!,
+                  isSelected: _paymentMode.toLowerCase() == first['name']!.toLowerCase(),
+                  accentColor: scheme.primary,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() => _paymentMode = first['name']!);
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: second != null
+                    ? _buildTwoColumnGridTile(
+                        isDark: isDark,
+                        leadingIcon: FinTraxBrandHelper.buildIconBadge(
+                          assetPath: second['asset'],
+                          fallbackEmoji: second['emoji'] ?? '💳',
+                          size: 20,
+                        ),
+                        title: second['name']!,
+                        isSelected: _paymentMode.toLowerCase() == second['name']!.toLowerCase(),
+                        accentColor: scheme.primary,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _paymentMode = second['name']!);
+                          Navigator.pop(context);
+                        },
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     showModalBottomSheet(
       context: context,
@@ -257,7 +592,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       builder: (sheetCtx) {
         return Container(
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.65),
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.72),
           decoration: BoxDecoration(
             color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
             borderRadius: BorderRadius.circular(24),
@@ -275,11 +610,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 12, 10),
+                  padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Payment Method', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                      const Text('Payment Method / Bank', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
                         onPressed: () => Navigator.pop(sheetCtx),
@@ -292,22 +627,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   child: ListView(
                     padding: const EdgeInsets.all(14),
                     shrinkWrap: true,
-                    children: AppConstants.paymentModes.map((mode) {
-                      final String emoji = AppConstants.paymentModeEmojis[mode] ?? '💳';
-                      final bool isSelected = _paymentMode == mode;
-                      return _buildPickerOptionCard(
-                        isDark: isDark,
-                        emoji: emoji,
-                        title: mode,
-                        isSelected: isSelected,
-                        accentColor: scheme.primary,
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(() => _paymentMode = mode);
-                          Navigator.pop(sheetCtx);
-                        },
-                      );
-                    }).toList(),
+                    children: rows,
                   ),
                 ),
               ],
@@ -318,66 +638,105 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
-  Widget _buildPickerOptionCard({
-    required bool isDark,
-    required String emoji,
-    required String title,
-    required bool isSelected,
-    required Color accentColor,
-    required VoidCallback onTap,
-  }) {
-    final Color cardBg = isSelected
-        ? accentColor.withOpacity(isDark ? 0.18 : 0.12)
-        : (isDark ? const Color(0xFF1A1C22) : const Color(0xFFF8FAFC));
+  void _openOtherBooksSheet(bool isDark) {
+    HapticFeedback.lightImpact();
+    final scheme = Theme.of(context).colorScheme;
 
-    final Color borderColor = isSelected
-        ? accentColor
-        : (isDark ? AppConstants.borderDark : AppConstants.borderLight);
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: cardBg,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: borderColor, width: isSelected ? 1.4 : 1.0),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.black.withOpacity(0.35) : Colors.white,
-                    borderRadius: BorderRadius.circular(10),
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          return Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.65),
+            decoration: BoxDecoration(
+              color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+            ),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
                   ),
-                  child: Text(emoji, style: const TextStyle(fontSize: 18)),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _isEditingExisting ? 'Also Copy Entry to Books' : 'Also Add to Other Books',
+                          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => Navigator.pop(sheetCtx),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                if (isSelected)
-                  Icon(Icons.check_circle_rounded, color: accentColor, size: 22)
-                else
-                  Icon(Icons.circle_outlined, color: Colors.grey.withOpacity(0.35), size: 22),
-              ],
+                  const Divider(height: 1),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _otherBooks.length,
+                      itemBuilder: (_, idx) {
+                        final book = _otherBooks[idx];
+                        final int id = book['id'] as int;
+                        final String name = book['name'].toString();
+                        final bool isLending = (book['bookType']?.toString() ?? 'standard') == 'lending';
+                        final bool isSelected = _selectedExtraBookIds.contains(id);
+
+                        return CheckboxListTile(
+                          secondary: Icon(
+                            isLending ? Icons.handshake_rounded : Icons.book_rounded,
+                            color: isSelected ? scheme.primary : Colors.grey[500],
+                          ),
+                          title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+                          value: isSelected,
+                          onChanged: (val) {
+                            HapticFeedback.selectionClick();
+                            setSheetState(() {
+                              if (val == true) {
+                                _selectedExtraBookIds.add(id);
+                              } else {
+                                _selectedExtraBookIds.remove(id);
+                              }
+                            });
+                            setState(() {});
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(sheetCtx),
+                        child: Text(
+                          _selectedExtraBookIds.isEmpty
+                              ? 'Done'
+                              : 'Done (${_selectedExtraBookIds.length} Selected)',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -459,7 +818,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     required bool isDark,
     required String label,
     required String valueText,
-    required String emoji,
+    required Widget iconWidget,
     required VoidCallback onTap,
   }) {
     return Material(
@@ -484,7 +843,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   color: Theme.of(context).colorScheme.primary.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(9),
                 ),
-                child: Text(emoji, style: const TextStyle(fontSize: 16)),
+                child: iconWidget,
               ),
               const SizedBox(width: 9),
               Expanded(
@@ -561,7 +920,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Widget _buildPermanentSmsCard(bool isDark) {
     final scheme = Theme.of(context).colorScheme;
     return Container(
-      margin: const EdgeInsets.only(top: 16),
+      margin: const EdgeInsets.only(top: 14),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: isDark ? AppConstants.cardDark : const Color(0xFFF8FAFC),
@@ -615,77 +974,58 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
-  Widget _buildMultiBookSelectorCard(bool isDark) {
+  Widget _buildCompactMultiBookButton(bool isDark) {
     if (_otherBooks.isEmpty) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
+    final int count = _selectedExtraBookIds.length;
 
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Material(
         color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.library_add_check_rounded, size: 18, color: scheme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _isEditingExisting ? 'Also Copy Entry to Other Books' : 'Also Add to Other Books (Optional)',
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
-                ),
-              ),
-            ],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: count > 0 ? scheme.primary : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+            width: count > 0 ? 1.3 : 1.0,
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Tap to save this same entry into additional books at once:',
-            style: TextStyle(fontSize: 11.5, color: Colors.grey[500]),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _otherBooks.map((book) {
-              final int id = book['id'] as int;
-              final String name = book['name'].toString();
-              final bool isLending = (book['bookType']?.toString() ?? 'standard') == 'lending';
-              final bool selected = _selectedExtraBookIds.contains(id);
-
-              return FilterChip(
-                selected: selected,
-                showCheckmark: true,
-                avatar: Icon(
-                  isLending ? Icons.handshake_rounded : Icons.book_rounded,
-                  size: 15,
-                  color: selected ? scheme.primary : Colors.grey[500],
-                ),
-                label: Text(
-                  name,
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _openOtherBooksSheet(isDark),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            child: Row(
+              children: [
+                Icon(Icons.library_add_check_rounded, size: 20, color: scheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _isEditingExisting ? 'Also Copy Entry to Other Books' : 'Also Add to Other Books',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                   ),
                 ),
-                onSelected: (val) {
-                  HapticFeedback.selectionClick();
-                  setState(() {
-                    if (val) {
-                      _selectedExtraBookIds.add(id);
-                    } else {
-                      _selectedExtraBookIds.remove(id);
-                    }
-                  });
-                },
-              );
-            }).toList(),
+                if (count > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: scheme.primary.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '$count selected',
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: scheme.primary),
+                    ),
+                  )
+                else
+                  Text('Select', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: scheme.primary)),
+                const SizedBox(width: 4),
+                Icon(Icons.keyboard_arrow_right_rounded, size: 18, color: Colors.grey[500]),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -697,6 +1037,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     final String screenTitle = widget.isSmsDraft
         ? 'Review SMS $_selectedType'
         : (widget.existingTransaction == null ? 'Add $_selectedType' : 'Edit $_selectedType');
+
+    final paymentIconAsset = FinTraxBrandHelper.getPaymentIconAsset(_paymentMode, smsBody: _smsText);
 
     return Scaffold(
       appBar: AppBar(
@@ -737,14 +1079,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               controller: _nameController,
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
-                labelText: 'Remark / Title (e.g., Electricity Bill)',
+                labelText: 'Remark / Title (e.g., Flipkart, Zomato, Bill)',
                 filled: true,
                 fillColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
             const SizedBox(height: 14),
-            // Side-by-side Category & Payment Method row
             Row(
               children: [
                 Expanded(
@@ -752,7 +1093,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     isDark: isDark,
                     label: 'Category',
                     valueText: _selectedCategory ?? 'None',
-                    emoji: _getEmojiForCategory(_selectedCategory),
+                    iconWidget: Text(_getEmojiForCategory(_selectedCategory), style: const TextStyle(fontSize: 16)),
                     onTap: () => _openCategoryPicker(isDark),
                   ),
                 ),
@@ -762,7 +1103,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     isDark: isDark,
                     label: 'Payment Mode',
                     valueText: _paymentMode,
-                    emoji: AppConstants.paymentModeEmojis[_paymentMode] ?? '💳',
+                    iconWidget: FinTraxBrandHelper.buildIconBadge(
+                      assetPath: paymentIconAsset,
+                      fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(_paymentMode),
+                      size: 20,
+                    ),
                     onTap: () => _openPaymentModePicker(isDark),
                   ),
                 ),
@@ -786,8 +1131,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
             ),
             if (_smsText.isNotEmpty) _buildPermanentSmsCard(isDark),
-            _buildMultiBookSelectorCard(isDark),
-            const SizedBox(height: 16),
+            _buildCompactMultiBookButton(isDark),
+            const SizedBox(height: 14),
             Material(
               color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
               shape: RoundedRectangleBorder(
@@ -799,15 +1144,15 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 onTap: _pickImage,
                 borderRadius: BorderRadius.circular(14),
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                   child: Row(
                     children: [
-                      Icon(Icons.add_photo_alternate_outlined, color: Theme.of(context).colorScheme.primary),
+                      Icon(Icons.add_photo_alternate_outlined, size: 20, color: Theme.of(context).colorScheme.primary),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           _imagePath.isEmpty ? 'Attach Receipt or Screenshot' : 'Change Attached Image',
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                       ),
                     ],
@@ -860,7 +1205,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               const SizedBox(height: 6),
               Text('Tap image to view full screen', style: TextStyle(fontSize: 11, color: Colors.grey[500]), textAlign: TextAlign.center),
             ],
-            const SizedBox(height: 28),
+            const SizedBox(height: 26),
             FilledButton(
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
