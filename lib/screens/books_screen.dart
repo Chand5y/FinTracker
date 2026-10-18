@@ -201,55 +201,158 @@ class WelcomeSetupScreen extends StatefulWidget {
   State<WelcomeSetupScreen> createState() => _WelcomeSetupScreenState();
 }
 
-class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
+class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBindingObserver {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   int _step = 0;
-  bool _finishingSms = false;
+  bool _waitingForNotifDialog = false;
+  bool _waitingForSmsDialog = false;
+  bool _dialogPausedApp = false;
+  bool _completedOnboarding = false;
+  Timer? _noDialogFallbackTimer;
 
-  void _handleNotificationStep(bool enable) {
-    HapticFeedback.mediumImpact();
-    final prefs = Provider.of<ThemeProvider>(context, listen: false);
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
-    // Advance UI to Step 3 immediately so the screen never freezes on Step 2
-    setState(() => _step = 2);
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _noDialogFallbackTimer?.cancel();
+    super.dispose();
+  }
 
-    if (enable) {
-      unawaited(prefs.setDailyReminder(enabled: true, hour: 21, minute: 0));
-      unawaited(_nativeBridge.invokeMethod('requestNotificationPermission').catchError((_) => null));
-      unawaited(_nativeBridge.invokeMethod('scheduleDailyReminder', {
-        'enabled': true,
-        'hour': 21,
-        'minute': 0,
-      }).catchError((_) => null));
-    } else {
-      unawaited(prefs.setDailyReminder(enabled: false, hour: 21, minute: 0));
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!_waitingForNotifDialog && !_waitingForSmsDialog) return;
+
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // The Android system permission dialog is now open on top of FinTrax
+      _dialogPausedApp = true;
+      _noDialogFallbackTimer?.cancel();
+    } else if (state == AppLifecycleState.resumed && _dialogPausedApp) {
+      // The user just tapped Allow or Deny on the system permission dialog
+      _dialogPausedApp = false;
+      if (_waitingForNotifDialog) {
+        _advanceFromNotifToStep3();
+      } else if (_waitingForSmsDialog) {
+        _finishOnboardingAndGoHome();
+      }
     }
   }
 
-  Future<void> _handleSmsStep(bool enable) async {
-    if (_finishingSms) return;
-    setState(() => _finishingSms = true);
+  void _advanceFromNotifToStep3() {
+    _noDialogFallbackTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _waitingForNotifDialog = false;
+      _step = 2;
+    });
+  }
+
+  Future<void> _handleNotificationStep(bool enable) async {
+    if (_waitingForNotifDialog) return;
     HapticFeedback.mediumImpact();
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
 
-    try {
-      await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
-    } catch (_) {}
-
-    if (enable) {
-      bool granted = false;
-      try {
-        granted = await _nativeBridge
-                .invokeMethod<bool>('requestSmsPermission')
-                .timeout(const Duration(seconds: 10), onTimeout: () => false) ??
-            false;
-      } catch (_) {}
-      await prefs.setSmsAutoTrack(granted);
-    } else {
-      await prefs.setSmsAutoTrack(false);
+    if (!enable) {
+      unawaited(prefs.setDailyReminder(enabled: false, hour: 21, minute: 0));
+      setState(() => _step = 2);
+      return;
     }
 
+    setState(() {
+      _waitingForNotifDialog = true;
+      _dialogPausedApp = false;
+    });
+
+    unawaited(prefs.setDailyReminder(enabled: true, hour: 21, minute: 0));
+    unawaited(_nativeBridge.invokeMethod('requestNotificationPermission').catchError((_) => null));
+    unawaited(_nativeBridge.invokeMethod('scheduleDailyReminder', {
+      'enabled': true,
+      'hour': 21,
+      'minute': 0,
+    }).catchError((_) => null));
+
+    // If Android < 13 or permission was already granted (so no system popup opens),
+    // advance automatically after 650ms. If a popup DOES open, didChangeAppLifecycleState
+    // cancels this timer and waits until the user taps Allow/Deny.
+    _noDialogFallbackTimer?.cancel();
+    _noDialogFallbackTimer = Timer(const Duration(milliseconds: 650), () {
+      if (mounted && _waitingForNotifDialog && !_dialogPausedApp) {
+        _advanceFromNotifToStep3();
+      }
+    });
+  }
+
+  Future<void> _finishOnboardingAndGoHome() async {
+    if (_completedOnboarding) return;
+    _completedOnboarding = true;
+    _noDialogFallbackTimer?.cancel();
+    _waitingForSmsDialog = false;
+
+    final prefs = Provider.of<ThemeProvider>(context, listen: false);
+    unawaited(DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done').catchError((_) {}));
+
+    // Navigate to Home Screen immediately so UI never gets stuck
     widget.onFinished();
+
+    // Check whether SMS permission was granted and update preferences in background
+    try {
+      final granted = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
+      await prefs.setSmsAutoTrack(granted);
+    } catch (_) {}
+  }
+
+  Future<void> _handleSmsStep(bool enable) async {
+    if (_waitingForSmsDialog || _completedOnboarding) return;
+    HapticFeedback.mediumImpact();
+    final prefs = Provider.of<ThemeProvider>(context, listen: false);
+
+    if (!enable) {
+      _completedOnboarding = true;
+      unawaited(prefs.setSmsAutoTrack(false));
+      unawaited(DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done').catchError((_) {}));
+      widget.onFinished();
+      return;
+    }
+
+    // If SMS permission is already granted, go straight to Home Screen
+    bool alreadyGranted = false;
+    try {
+      alreadyGranted = await _nativeBridge
+              .invokeMethod<bool>('checkSmsPermission')
+              .timeout(const Duration(milliseconds: 400), onTimeout: () => false) ??
+          false;
+    } catch (_) {}
+
+    if (alreadyGranted) {
+      await _finishOnboardingAndGoHome();
+      return;
+    }
+
+    setState(() {
+      _waitingForSmsDialog = true;
+      _dialogPausedApp = false;
+    });
+
+    // Trigger Android SMS permission dialog; if the channel returns directly, finish immediately
+    _nativeBridge.invokeMethod<bool>('requestSmsPermission').then((_) {
+      if (mounted && _waitingForSmsDialog) {
+        _finishOnboardingAndGoHome();
+      }
+    }).catchError((_) {});
+
+    // If Android suppresses the dialog (e.g. permanently denied), advance after 800ms.
+    // Otherwise, didChangeAppLifecycleState cancels this timer while the popup is open
+    // and goes to the Home Screen the instant the user taps Allow or Deny.
+    _noDialogFallbackTimer?.cancel();
+    _noDialogFallbackTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted && _waitingForSmsDialog && !_dialogPausedApp) {
+        _finishOnboardingAndGoHome();
+      }
+    });
   }
 
   Widget _featureTile(bool isDark, IconData icon, String title, String subtitle) {
@@ -295,7 +398,11 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
       canPop: _step == 0,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _step > 0) {
-          setState(() => _step -= 1);
+          setState(() {
+            _waitingForNotifDialog = false;
+            _waitingForSmsDialog = false;
+            _step -= 1;
+          });
         }
       },
       child: Scaffold(
@@ -595,7 +702,6 @@ class _BooksScreenState extends State<BooksScreen> {
           .timeout(const Duration(seconds: 2), onTimeout: () => <String>{});
     } catch (_) {}
 
-    // Check onboarding BEFORE showing the Home screen
     if (!handledSet.contains('__onboarding_v1_done__')) {
       if (mounted) {
         setState(() {
