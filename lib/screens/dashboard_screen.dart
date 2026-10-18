@@ -669,7 +669,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
-              'Showing ${_transactions.length} ${_transactions.length == 1 ? 'entry' : 'entries'} • Long-press for Copy / Move',
+              'Showing ${_transactions.length} ${_transactions.length == 1 ? 'entry' : 'entries'} • Long-press for options',
               style: TextStyle(color: Colors.grey[500], fontSize: 11.5, fontWeight: FontWeight.w500),
             ),
           ),
