@@ -27,8 +27,11 @@ class TransactionModel {
     required this.paymentMode,
   });
 
-  /// Returns the permanent SMS text (falls back to notes for older SMS entries)
-  String get effectiveSmsText => smsBody.isNotEmpty ? smsBody : notes;
+  /// Returns the permanent SMS text without mixing it with user notes
+  String get effectiveSmsText => smsBody;
+
+  /// Returns true if the user has written a personal note on this entry
+  bool get hasUserNote => notes.trim().isNotEmpty;
 
   TransactionModel copyWith({
     int? id,
@@ -81,6 +84,9 @@ class TransactionModel {
   factory TransactionModel.fromMap(Map<String, dynamic> map) {
     final String rawNotes = map['notes']?.toString() ?? '';
     final String rawSms = map['smsBody']?.toString() ?? '';
+    // If an older entry had identical text in notes and smsBody from an SMS import, clear notes so it's not duplicated
+    final String cleanNotes = (rawSms.isNotEmpty && rawNotes == rawSms) ? '' : rawNotes;
+
     return TransactionModel(
       id: (map['id'] as num?)?.toInt(),
       bookId: (map['bookId'] as num).toInt(),
@@ -88,8 +94,8 @@ class TransactionModel {
       amount: (map['amount'] as num).toDouble(),
       name: map['name']?.toString() ?? '',
       category: map['category']?.toString() ?? '',
-      notes: rawNotes,
-      smsBody: rawSms.isNotEmpty ? rawSms : rawNotes,
+      notes: cleanNotes,
+      smsBody: rawSms,
       imagePath: map['imagePath']?.toString() ?? '',
       date: DateTime.tryParse(map['date']?.toString() ?? '') ?? DateTime.now(),
       currency: map['currency']?.toString() ?? '₹',
