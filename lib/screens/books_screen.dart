@@ -228,11 +228,9 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
     if (!_waitingForNotifDialog && !_waitingForSmsDialog) return;
 
     if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
-      // The Android system permission dialog is now open on top of FinTrax
       _dialogPausedApp = true;
       _noDialogFallbackTimer?.cancel();
     } else if (state == AppLifecycleState.resumed && _dialogPausedApp) {
-      // The user just tapped Allow or Deny on the system permission dialog
       _dialogPausedApp = false;
       if (_waitingForNotifDialog) {
         _advanceFromNotifToStep3();
@@ -275,9 +273,6 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
       'minute': 0,
     }).catchError((_) => null));
 
-    // If Android < 13 or permission was already granted (so no system popup opens),
-    // advance automatically after 650ms. If a popup DOES open, didChangeAppLifecycleState
-    // cancels this timer and waits until the user taps Allow/Deny.
     _noDialogFallbackTimer?.cancel();
     _noDialogFallbackTimer = Timer(const Duration(milliseconds: 650), () {
       if (mounted && _waitingForNotifDialog && !_dialogPausedApp) {
@@ -293,16 +288,18 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
     _waitingForSmsDialog = false;
 
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
-    unawaited(DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done').catchError((_) {}));
+    try {
+      await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+    } catch (_) {}
 
-    // Navigate to Home Screen immediately so UI never gets stuck
-    widget.onFinished();
-
-    // Check whether SMS permission was granted and update preferences in background
+    // Give Android 250ms to finalize the permission grant state before checking
+    await Future.delayed(const Duration(milliseconds: 250));
     try {
       final granted = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
       await prefs.setSmsAutoTrack(granted);
     } catch (_) {}
+
+    widget.onFinished();
   }
 
   Future<void> _handleSmsStep(bool enable) async {
@@ -312,13 +309,15 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
 
     if (!enable) {
       _completedOnboarding = true;
-      unawaited(prefs.setSmsAutoTrack(false));
-      unawaited(DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done').catchError((_) {}));
+      await prefs.setSmsAutoTrack(false);
+      try {
+        await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+        await DatabaseHelper.instance.markSmsHandled('__sms_manually_off__', 'true');
+      } catch (_) {}
       widget.onFinished();
       return;
     }
 
-    // If SMS permission is already granted, go straight to Home Screen
     bool alreadyGranted = false;
     try {
       alreadyGranted = await _nativeBridge
@@ -328,6 +327,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
     } catch (_) {}
 
     if (alreadyGranted) {
+      await prefs.setSmsAutoTrack(true);
       await _finishOnboardingAndGoHome();
       return;
     }
@@ -337,16 +337,15 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
       _dialogPausedApp = false;
     });
 
-    // Trigger Android SMS permission dialog; if the channel returns directly, finish immediately
-    _nativeBridge.invokeMethod<bool>('requestSmsPermission').then((_) {
+    _nativeBridge.invokeMethod<bool>('requestSmsPermission').then((granted) async {
+      if (granted == true) {
+        await prefs.setSmsAutoTrack(true);
+      }
       if (mounted && _waitingForSmsDialog) {
-        _finishOnboardingAndGoHome();
+        await _finishOnboardingAndGoHome();
       }
     }).catchError((_) {});
 
-    // If Android suppresses the dialog (e.g. permanently denied), advance after 800ms.
-    // Otherwise, didChangeAppLifecycleState cancels this timer while the popup is open
-    // and goes to the Home Screen the instant the user taps Allow or Deny.
     _noDialogFallbackTimer?.cancel();
     _noDialogFallbackTimer = Timer(const Duration(milliseconds: 800), () {
       if (mounted && _waitingForSmsDialog && !_dialogPausedApp) {
@@ -675,7 +674,6 @@ class _BooksScreenState extends State<BooksScreen> {
   int _tabIndex = 0;
   List<Map<String, dynamic>> _books = [];
   List<ParsedSmsTransaction> _pendingSms = [];
-  bool _isInitializing = true;
   bool _loading = false;
   bool _showOnboarding = false;
   BookSort _sortOrder = BookSort.updated;
@@ -704,17 +702,13 @@ class _BooksScreenState extends State<BooksScreen> {
 
     if (!handledSet.contains('__onboarding_v1_done__')) {
       if (mounted) {
-        setState(() {
-          _showOnboarding = true;
-          _isInitializing = false;
-        });
+        setState(() => _showOnboarding = true);
       }
       return;
     }
 
     await _loadBooks();
     if (mounted) {
-      setState(() => _isInitializing = false);
       unawaited(_initBackgroundTasks(handledSet));
     }
   }
@@ -722,6 +716,25 @@ class _BooksScreenState extends State<BooksScreen> {
   Future<void> _initBackgroundTasks(Set<String> handledSet) async {
     if (!mounted) return;
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
+
+    // Wait briefly if ThemeProvider is still reading SharedPreferences from disk
+    for (int i = 0; i < 10 && !prefs.isInitialized; i++) {
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+    if (!mounted) return;
+
+    // Ensure Smart SMS Auto-Track stays ON if Android SMS permission is granted
+    // (unless the user explicitly turned the switch off in Settings)
+    try {
+      final hasOsSmsPerm = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
+      final manuallyTurnedOff = handledSet.contains('__sms_manually_off__');
+      if (hasOsSmsPerm && !manuallyTurnedOff && !prefs.smsAutoTrack) {
+        await prefs.setSmsAutoTrack(true);
+      }
+    } catch (_) {}
+
+    // Refresh SMS inbox now that preferences and permissions are synchronized
+    await _refreshSmsInbox();
 
     if (!handledSet.contains('__default_9pm_migrated__')) {
       if (prefs.reminderHour == 22 && prefs.reminderMinute == 0) {
@@ -862,22 +875,32 @@ class _BooksScreenState extends State<BooksScreen> {
   Future<void> _refreshSmsInbox() async {
     if (!mounted) return;
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
-    if (!prefs.smsAutoTrack) {
-      if (mounted) setState(() => _pendingSms = []);
-      return;
-    }
     try {
       final permitted = await _nativeBridge
               .invokeMethod<bool>('checkSmsPermission')
               .timeout(const Duration(seconds: 2), onTimeout: () => false) ??
           false;
-      if (!permitted) return;
+      if (!permitted) {
+        if (mounted) setState(() => _pendingSms = []);
+        return;
+      }
+
+      final ignoredIds = await DatabaseHelper.instance.getHandledSmsIds();
+      final manuallyOff = ignoredIds.contains('__sms_manually_off__');
+
+      if (manuallyOff && !prefs.smsAutoTrack) {
+        if (mounted) setState(() => _pendingSms = []);
+        return;
+      }
+
+      if (!prefs.smsAutoTrack && !manuallyOff) {
+        await prefs.setSmsAutoTrack(true);
+      }
 
       final rawList = await _nativeBridge
               .invokeMethod<List<dynamic>>('getBankSms')
               .timeout(const Duration(seconds: 3), onTimeout: () => <dynamic>[]) ??
           [];
-      final ignoredIds = await DatabaseHelper.instance.getHandledSmsIds();
 
       final detected = <ParsedSmsTransaction>[];
       for (final item in rawList) {
@@ -1882,7 +1905,7 @@ class _BooksScreenState extends State<BooksScreen> {
         amount: sms.amount,
         name: sms.merchant,
         category: '',
-        notes: sms.body,
+        notes: '',
         smsBody: sms.body,
         date: sms.date,
         currency: AppConstants.defaultCurrency,
@@ -1989,9 +2012,7 @@ class _BooksScreenState extends State<BooksScreen> {
           'Google Play Services rejected the sign-in: ${e.message ?? e.code}\n\n'
           'Live APK Package: $livePkg\n'
           'Live APK SHA-1:\n$liveSha1\n\n'
-          'If this SHA-1 matches your Android Client in Google Cloud Console, check:\n'
-          '1. In Google Cloud Console -> Clients, tap "Restore deleted OAuth clients" and permanently delete any old duplicate client with this SHA-1.\n'
-          '2. In Google Cloud Console -> Data Access, ensure ".../auth/drive.appdata" is added to your scopes.',
+          'Make sure your Android OAuth Client in Google Cloud Console has this exact SHA-1 (notice "DB" in the 7th pair, not "D8").',
         );
       }
       return null;
@@ -2716,6 +2737,10 @@ class _BooksScreenState extends State<BooksScreen> {
                     }
                     return;
                   }
+                  final db = await DatabaseHelper.instance.database;
+                  await db.delete('handled_sms', where: 'smsId = ?', whereArgs: ['__sms_manually_off__']);
+                } else {
+                  await DatabaseHelper.instance.markSmsHandled('__sms_manually_off__', 'true');
                 }
                 await prefs.setSmsAutoTrack(v);
                 await _refreshSmsInbox();
@@ -2946,12 +2971,6 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isInitializing) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     if (_showOnboarding) {
       return WelcomeSetupScreen(
         onFinished: () async {
