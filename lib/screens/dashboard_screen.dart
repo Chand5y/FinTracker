@@ -683,6 +683,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       final tx = _transactions[index];
                       final bool hasImage = tx.imagePath.isNotEmpty;
                       final bool hasSms = tx.effectiveSmsText.isNotEmpty;
+                      final bool hasNote = tx.hasUserNote;
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
@@ -747,10 +748,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       const SizedBox(width: 8),
                                       Text(AppConstants.formatOrdinalDateTime(tx.date), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                                       const Spacer(),
+                                      if (hasNote)
+                                        Padding(
+                                          padding: const EdgeInsets.only(right: 6),
+                                          child: Tooltip(
+                                            message: 'Has Note',
+                                            child: Icon(
+                                              Icons.sticky_note_2_outlined,
+                                              size: 15,
+                                              color: Theme.of(context).colorScheme.primary.withOpacity(0.85),
+                                            ),
+                                          ),
+                                        ),
                                       if (hasSms)
                                         Padding(
                                           padding: const EdgeInsets.only(right: 6),
-                                          child: Icon(Icons.sms_outlined, size: 15, color: Theme.of(context).colorScheme.primary.withOpacity(0.8)),
+                                          child: Tooltip(
+                                            message: 'Bank SMS Attached',
+                                            child: Icon(
+                                              Icons.sms_outlined,
+                                              size: 15,
+                                              color: Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                                            ),
+                                          ),
                                         ),
                                       if (hasImage) Icon(Icons.attachment_rounded, size: 16, color: Colors.grey[500]),
                                     ],
