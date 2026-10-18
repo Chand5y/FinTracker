@@ -66,6 +66,21 @@ class AppLogger {
     log('Saved Drive Account: "${prefs.driveAccount.isEmpty ? "NONE" : prefs.driveAccount}"', tag: 'PREFS');
   }
 
+  static String explainPlayServicesCode(String rawMessage, String code) {
+    final combined = '$code $rawMessage';
+    if (combined.contains('10:') || combined.contains('statusCode=DEVELOPER_ERROR')) {
+      return 'CODE 10 (DEVELOPER_ERROR): Google Play Services rejected the OAuth handshake. '
+          'Note: Check your GitHub Actions "Sign APK" step to ensure the SHA-1 matches Google Cloud exactly.';
+    }
+    if (combined.contains('12500:')) {
+      return 'CODE 12500 (SIGN_IN_FAILED): OAuth Consent Screen configuration in Google Cloud Console is incomplete.';
+    }
+    if (combined.contains('12501:')) {
+      return 'CODE 12501 (SIGN_IN_CANCELLED): The account picker was closed or cancelled before completion.';
+    }
+    return 'PlatformException ($code): $rawMessage';
+  }
+
   Future<String?> saveLogsToDownloads() async {
     final fileName = 'FinTrax_Debug_Log_${DateTime.now().millisecondsSinceEpoch}.txt';
     final bytes = Uint8List.fromList(utf8.encode(dumpAllText()));
@@ -193,36 +208,52 @@ class WelcomeSetupScreen extends StatefulWidget {
 class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   int _step = 0;
+  bool _isProcessing = false;
 
-  void _handleNotificationStep(bool enable) {
+  Future<void> _handleNotificationStep(bool enable) async {
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
     HapticFeedback.mediumImpact();
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
-    
-    // Transition UI instantly to prevent freezing
-    setState(() => _step = 2);
 
     if (enable) {
+      try {
+        await _nativeBridge.invokeMethod('requestNotificationPermission');
+      } catch (_) {}
       prefs.setDailyReminder(enabled: true, hour: 21, minute: 0);
-      _nativeBridge.invokeMethod('requestNotificationPermission');
-      _nativeBridge.invokeMethod('scheduleDailyReminder', {'enabled': true, 'hour': 21, 'minute': 0});
+      try {
+        await _nativeBridge.invokeMethod('scheduleDailyReminder', {'enabled': true, 'hour': 21, 'minute': 0});
+      } catch (_) {}
     } else {
       prefs.setDailyReminder(enabled: false, hour: 21, minute: 0);
     }
+    
+    if (mounted) {
+      setState(() {
+        _step = 2;
+        _isProcessing = false;
+      });
+    }
   }
 
-  void _handleSmsStep(bool enable) {
+  Future<void> _handleSmsStep(bool enable) async {
+    if (_isProcessing) return;
+    setState(() => _isProcessing = true);
     HapticFeedback.mediumImpact();
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
 
     if (enable) {
-      _nativeBridge.invokeMethod<bool>('requestSmsPermission').then((granted) {
-        prefs.setSmsAutoTrack(granted ?? false);
-      });
+      try {
+        final granted = await _nativeBridge.invokeMethod<bool>('requestSmsPermission') ?? false;
+        prefs.setSmsAutoTrack(granted);
+      } catch (_) {}
     } else {
       prefs.setSmsAutoTrack(false);
     }
     
-    DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+    try {
+      await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+    } catch (_) {}
     widget.onFinished();
   }
 
@@ -312,7 +343,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'Your Friendly Personal Finance Companion',
+                              'Your Friendly Personal Finance Coach',
                               style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, height: 1.25),
                             ),
                             const SizedBox(height: 10),
@@ -324,20 +355,20 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                             _featureTile(
                               isDark,
                               Icons.menu_book_rounded,
-                              'Smart Expense & Lending (Udhaar) Books',
+                              'Smart Expense & Udhaar Books',
                               'Create dedicated books for Monthly Expenses, Groceries, Shopping, or Money Lent to friends so you never forget who owes you.',
                             ),
                             _featureTile(
                               isDark,
                               Icons.sms_outlined,
-                              'Effortless Bank & UPI SMS Detection',
+                              'Effortless SMS Detection',
                               'Automatically spots bank & UPI alerts on your phone so you can review and add entries in a single tap.',
                             ),
                             _featureTile(
                               isDark,
                               Icons.library_add_check_rounded,
-                              'Multi-Book Logging & Monthly Insights',
-                              'Save one expense into multiple books at once, export clean PDF statements, and get a full financial summary on the 1st of every month.',
+                              'Multi-Book & Monthly Insights',
+                              'Save one expense into multiple books at once, export clean PDFs, and get a full financial summary every month.',
                             ),
                             const SizedBox(height: 8),
                             Container(
@@ -387,12 +418,12 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                                 ),
                                 const SizedBox(height: 18),
                                 const Text(
-                                  'Never Miss an Entry with a Friendly Evening Check-In',
+                                  'Never Miss an Entry with a Friendly Check-In',
                                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  'Financial awareness comes down to one simple habit: taking 30 seconds in the evening to log what you spent today while it is still fresh in your mind.',
+                                  'Enable notifications so FinTrax can gently remind you to log your entries. Building financial awareness comes down to one tiny habit: taking 30 seconds in the evening to log what you spent today.',
                                   style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                 ),
                                 const SizedBox(height: 16),
@@ -423,12 +454,12 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                                 ),
                                 const SizedBox(height: 18),
                                 const Text(
-                                  'Make Tracking Effortless with Local SMS Auto-Detection',
+                                  'Make Tracking Effortless with Offline SMS Detection',
                                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
-                                  'We know SMS permission feels sensitive—and you have every right to be cautious! Here is why FinTrax asks for it and how your privacy stays 100% protected:',
+                                  'We know SMS permission feels sensitive—and you have every right to be cautious! Here is exactly why FinTrax asks for it and how your privacy stays 100% protected:',
                                   style: TextStyle(fontSize: 13.5, height: 1.5, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                 ),
                                 const SizedBox(height: 16),
@@ -475,7 +506,9 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   onPressed: () => _handleNotificationStep(true),
-                  icon: const Icon(Icons.notifications_active_outlined),
+                  icon: _isProcessing 
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.notifications_active_outlined),
                   label: const Text('Enable Reminders & Continue', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(height: 6),
@@ -490,7 +523,9 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                   onPressed: () => _handleSmsStep(true),
-                  icon: const Icon(Icons.verified_user_outlined),
+                  icon: _isProcessing 
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.verified_user_outlined),
                   label: const Text('Allow SMS Auto-Track & Start', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
                 const SizedBox(height: 6),
@@ -521,8 +556,8 @@ class _BooksScreenState extends State<BooksScreen> {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   static const String _driveAppDataScope = 'https://www.googleapis.com/auth/drive.appdata';
   static const String _backupFileName = 'fintrax_cloud_backup.json';
+  static const String _webServerClientId = '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com';
 
-  // Direct Android GoogleSignIn without Server Client ID
   final GoogleSignIn _googleAuth = GoogleSignIn(
     scopes: <String>[_driveAppDataScope],
   );
@@ -535,48 +570,50 @@ class _BooksScreenState extends State<BooksScreen> {
   int _tabIndex = 0;
   List<Map<String, dynamic>> _books = [];
   List<ParsedSmsTransaction> _pendingSms = [];
-  bool _loading = true;
+  bool _isInitializing = true;
   bool _showOnboarding = false;
   BookSort _sortOrder = BookSort.updated;
   Timer? _autoBackupTimer;
-  Timer? _loadingWatchdog;
 
   @override
   void initState() {
     super.initState();
     AppLogger.instance.log('BooksScreen.initState() called.', tag: 'LIFECYCLE');
-    _loadingWatchdog = Timer(const Duration(milliseconds: 1500), () {
-      if (mounted && _loading) {
-        setState(() => _loading = false);
-      }
-    });
     _startupSequence();
   }
 
   @override
   void dispose() {
     _autoBackupTimer?.cancel();
-    _loadingWatchdog?.cancel();
     super.dispose();
   }
 
   Future<void> _startupSequence() async {
+    Set<String> handledSet = <String>{};
+    try {
+      handledSet = await DatabaseHelper.instance.getHandledSmsIds();
+    } catch (_) {}
+
+    if (!handledSet.contains('__onboarding_v1_done__')) {
+      if (mounted) {
+        setState(() {
+          _showOnboarding = true;
+          _isInitializing = false;
+        });
+      }
+      return;
+    }
+
     await _loadBooks();
     if (mounted) {
-      await _initBackgroundTasks();
+      setState(() => _isInitializing = false);
+      _initBackgroundTasks(handledSet);
     }
   }
 
-  Future<void> _initBackgroundTasks() async {
+  Future<void> _initBackgroundTasks(Set<String> handledSet) async {
     final prefs = Provider.of<ThemeProvider>(context, listen: false);
     if (!mounted) return;
-
-    Set<String> handledSet = <String>{};
-    try {
-      handledSet = await DatabaseHelper.instance
-          .getHandledSmsIds()
-          .timeout(const Duration(seconds: 2), onTimeout: () => <String>{});
-    } catch (_) {}
 
     if (!handledSet.contains('__default_9pm_migrated__')) {
       if (prefs.reminderHour == 22 && prefs.reminderMinute == 0) {
@@ -591,11 +628,6 @@ class _BooksScreenState extends State<BooksScreen> {
       } catch (_) {}
     }
 
-    if (!handledSet.contains('__onboarding_v1_done__')) {
-      if (mounted) setState(() => _showOnboarding = true);
-      return;
-    }
-
     await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
 
     try {
@@ -603,7 +635,7 @@ class _BooksScreenState extends State<BooksScreen> {
         'enabled': prefs.dailyReminderEnabled,
         'hour': prefs.reminderHour,
         'minute': prefs.reminderMinute,
-      }).timeout(const Duration(seconds: 2));
+      });
     } catch (_) {}
 
     await _checkAndShowFirstOfMonthInsights(handledSet);
@@ -619,10 +651,7 @@ class _BooksScreenState extends State<BooksScreen> {
     try {
       bool launchedFromInsightNotif = false;
       try {
-        launchedFromInsightNotif = await _nativeBridge
-                .invokeMethod<bool>('consumeMonthlyInsightIntent')
-                .timeout(const Duration(seconds: 1)) ??
-            false;
+        launchedFromInsightNotif = await _nativeBridge.invokeMethod<bool>('consumeMonthlyInsightIntent') ?? false;
       } catch (_) {}
 
       final now = DateTime.now();
@@ -680,9 +709,7 @@ class _BooksScreenState extends State<BooksScreen> {
   Future<void> _loadBooks() async {
     if (!mounted) return;
     try {
-      final rows = await DatabaseHelper.instance
-          .getBooksWithBalances()
-          .timeout(const Duration(seconds: 2), onTimeout: () => <Map<String, dynamic>>[]);
+      final rows = await DatabaseHelper.instance.getBooksWithBalances();
 
       rows.sort((a, b) {
         final pinA = (a['isPinned'] ?? 0) as int;
@@ -707,15 +734,11 @@ class _BooksScreenState extends State<BooksScreen> {
       });
 
       if (mounted) {
-        setState(() {
-          _books = rows;
-          _loading = false;
-        });
+        setState(() => _books = rows);
       }
       unawaited(_refreshSmsInbox());
     } catch (e) {
       AppLogger.instance.log('Book load error: $e', tag: 'ERROR');
-      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -727,16 +750,10 @@ class _BooksScreenState extends State<BooksScreen> {
       return;
     }
     try {
-      final permitted = await _nativeBridge
-              .invokeMethod<bool>('checkSmsPermission')
-              .timeout(const Duration(seconds: 2), onTimeout: () => false) ??
-          false;
+      final permitted = await _nativeBridge.invokeMethod<bool>('checkSmsPermission') ?? false;
       if (!permitted) return;
 
-      final rawList = await _nativeBridge
-              .invokeMethod<List<dynamic>>('getBankSms')
-              .timeout(const Duration(seconds: 3), onTimeout: () => <dynamic>[]) ??
-          [];
+      final rawList = await _nativeBridge.invokeMethod<List<dynamic>>('getBankSms') ?? [];
       final ignoredIds = await DatabaseHelper.instance.getHandledSmsIds();
 
       final detected = <ParsedSmsTransaction>[];
@@ -2782,11 +2799,21 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isInitializing) {
+      return Scaffold(
+        backgroundColor: Theme.of(context).brightness == Brightness.dark ? AppConstants.bgDark : AppConstants.bgLight,
+        body: const Center(
+          child: CircularProgressIndicator(color: AppConstants.goldAccent),
+        ),
+      );
+    }
+
     if (_showOnboarding) {
       return WelcomeSetupScreen(
         onFinished: () {
           setState(() => _showOnboarding = false);
-          _initBackgroundTasks();
+          _loadBooks();
+          _initBackgroundTasks(<String>{});
         },
       );
     }
