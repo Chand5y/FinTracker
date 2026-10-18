@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -20,9 +19,6 @@ void main() {
   );
 }
 
-// ===========================================================================
-// REUSABLE FINTRAX BRAND LOGO ICON & LAUNCH SPLASH SCREEN
-// ===========================================================================
 class FinTraxLogoIcon extends StatelessWidget {
   final double size;
   const FinTraxLogoIcon({Key? key, this.size = 84}) : super(key: key);
@@ -71,7 +67,6 @@ class _FinTraxMonogramPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round;
 
-    // Stylized 'F' and 'T' monogram matching the FinTrax app icon
     final fPath = Path()
       ..moveTo(w * 0.26, h * 0.72)
       ..lineTo(w * 0.26, h * 0.38)
@@ -79,14 +74,12 @@ class _FinTraxMonogramPainter extends CustomPainter {
       ..lineTo(w * 0.50, h * 0.27);
     canvas.drawPath(fPath, goldPaint);
 
-    // Middle crossbar of F
     canvas.drawLine(
       Offset(w * 0.26, h * 0.49),
       Offset(w * 0.45, h * 0.49),
       goldPaint,
     );
 
-    // Stylized 'T' with upward financial arrow tip
     final tPath = Path()
       ..moveTo(w * 0.46, h * 0.27)
       ..lineTo(w * 0.76, h * 0.27);
@@ -257,26 +250,7 @@ class _AppLockGateState extends State<AppLockGate> {
 
   bool _unlocked = false;
   bool _promptTriggered = false;
-  bool _splashDone = false;
   bool _initialLockStateChecked = false;
-  Timer? _splashTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    // Show the branded FinTrax logo splash screen briefly on launch
-    _splashTimer = Timer(const Duration(milliseconds: 550), () {
-      if (mounted) {
-        setState(() => _splashDone = true);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _splashTimer?.cancel();
-    super.dispose();
-  }
 
   Future<void> _triggerBiometricUnlock() async {
     try {
@@ -298,7 +272,7 @@ class _AppLockGateState extends State<AppLockGate> {
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-    if (!themeProvider.isInitialized || !_splashDone) {
+    if (!themeProvider.isInitialized) {
       return const FinTraxSplashScreen();
     }
 
