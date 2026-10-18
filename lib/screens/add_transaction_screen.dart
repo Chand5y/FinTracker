@@ -31,6 +31,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   late String _selectedType;
   String? _selectedCategory;
   late String _paymentMode;
+  late DateTime _selectedDate;
   String _imagePath = '';
   String _smsText = '';
 
@@ -40,6 +41,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   List<Map<String, dynamic>> _otherBooks = [];
   final Set<int> _selectedExtraBookIds = <int>{};
+
+  bool get _isEditingExisting =>
+      widget.existingTransaction != null && widget.existingTransaction?.id != null && !widget.isSmsDraft;
 
   List<Map<String, String>> get _allCategories {
     final list = List<Map<String, String>>.from(AppConstants.categories);
@@ -54,6 +58,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   void initState() {
     super.initState();
     _selectedType = widget.type;
+    _selectedDate = widget.existingTransaction?.date ?? DateTime.now();
     _amountController = TextEditingController(
       text: widget.existingTransaction != null ? widget.existingTransaction!.amount.toStringAsFixed(0) : '',
     );
@@ -96,6 +101,61 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (c['name'] == catName) return c['emoji'] ?? '🏷️';
     }
     return '🏷️';
+  }
+
+  Future<void> _pickTransactionDate() async {
+    HapticFeedback.selectionClick();
+    final now = DateTime.now();
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate.isAfter(now) ? now : _selectedDate,
+      firstDate: DateTime(2000),
+      lastDate: now.add(const Duration(days: 365)),
+      helpText: 'SELECT TRANSACTION DATE',
+    );
+
+    if (pickedDate != null && mounted) {
+      setState(() {
+        _selectedDate = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          _selectedDate.hour,
+          _selectedDate.minute,
+          _selectedDate.second,
+        );
+      });
+    }
+  }
+
+  Future<void> _confirmAndDeleteEntry() async {
+    if (!_isEditingExisting) return;
+    HapticFeedback.mediumImpact();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Delete Entry?', style: TextStyle(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Are you sure you want to delete "${widget.existingTransaction!.name}" from this book?',
+          style: const TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppConstants.expenseRed, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      HapticFeedback.heavyImpact();
+      await DatabaseHelper.instance.deleteTransaction(widget.existingTransaction!.id!, widget.bookId);
+      if (mounted) Navigator.pop(context, true);
+    }
   }
 
   void _openCategoryPicker(bool isDark) {
@@ -376,7 +436,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       category: _selectedCategory ?? '',
       notes: _notesController.text.trim(),
       smsBody: _smsText,
-      date: widget.existingTransaction?.date ?? DateTime.now(),
+      date: _selectedDate,
       currency: AppConstants.defaultCurrency,
       paymentMode: _paymentMode,
       imagePath: _imagePath,
@@ -456,9 +516,50 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
+  Widget _buildDateSelectorRow(bool isDark) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: _pickTransactionDate,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Row(
+            children: [
+              Icon(Icons.calendar_month_rounded, size: 19, color: scheme.primary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Date: ${AppConstants.formatOrdinalDate(_selectedDate)}',
+                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: scheme.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Change Date',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: scheme.primary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPermanentSmsCard(bool isDark) {
     final scheme = Theme.of(context).colorScheme;
-    final txDate = widget.existingTransaction?.date;
     return Container(
       margin: const EdgeInsets.only(top: 16),
       padding: const EdgeInsets.all(14),
@@ -494,11 +595,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
               ),
               const Spacer(),
-              if (txDate != null)
-                Text(
-                  AppConstants.formatOrdinalDateTime(txDate),
-                  style: TextStyle(fontSize: 10.5, color: Colors.grey[500], fontWeight: FontWeight.w500),
-                ),
+              Text(
+                AppConstants.formatOrdinalDateTime(_selectedDate),
+                style: TextStyle(fontSize: 10.5, color: Colors.grey[500], fontWeight: FontWeight.w500),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -518,7 +618,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   Widget _buildMultiBookSelectorCard(bool isDark) {
     if (_otherBooks.isEmpty) return const SizedBox.shrink();
     final scheme = Theme.of(context).colorScheme;
-    final isEditing = widget.existingTransaction != null && widget.existingTransaction?.id != null;
 
     return Container(
       margin: const EdgeInsets.only(top: 16),
@@ -537,7 +636,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  isEditing ? 'Also Copy Entry to Other Books' : 'Also Add to Other Books (Optional)',
+                  _isEditingExisting ? 'Also Copy Entry to Other Books' : 'Also Add to Other Books (Optional)',
                   style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
                 ),
               ),
@@ -600,7 +699,17 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         : (widget.existingTransaction == null ? 'Add $_selectedType' : 'Edit $_selectedType');
 
     return Scaffold(
-      appBar: AppBar(title: Text(screenTitle)),
+      appBar: AppBar(
+        title: Text(screenTitle),
+        actions: [
+          if (_isEditingExisting)
+            IconButton(
+              tooltip: 'Delete Entry',
+              icon: const Icon(Icons.delete_outline_rounded, color: AppConstants.expenseRed),
+              onPressed: _confirmAndDeleteEntry,
+            ),
+        ],
+      ),
       body: Form(
         key: _formKey,
         child: ListView(
@@ -659,6 +768,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 14),
+            _buildDateSelectorRow(isDark),
             const SizedBox(height: 14),
             TextFormField(
               controller: _notesController,
