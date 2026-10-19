@@ -186,17 +186,62 @@ class FinTraxBrandHelper {
   }
 
   static String? getMerchantIconAsset(String name, {String smsBody = ''}) {
-    final text = '$name $smsBody'.toLowerCase();
-    if (text.contains('flipkart')) return 'assets/icons/Flipkart.png';
-    if (text.contains('amazon') || text.contains('amzn')) return 'assets/icons/amazon.png';
-    if (text.contains('myntra')) return 'assets/icons/Myntra.png';
-    if (text.contains('meesho')) return 'assets/icons/meesho.png';
-    if (text.contains('swiggy') || text.contains('instamart')) return 'assets/icons/swiggy.png';
-    if (text.contains('zomato') || text.contains('blinkit')) return 'assets/icons/zomato.png';
-    if (text.contains('jio')) return 'assets/icons/jio.png';
-    if (text.contains('airtel')) return 'assets/icons/airtel.png';
     return null;
   }
+
+  static Future<void> _ensureContactsTable() async {
+    final db = await DatabaseHelper.instance.database;
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS book_contacts (
+        bookId INTEGER PRIMARY KEY,
+        phone TEXT,
+        photoBase64 TEXT
+      )
+    ''');
+  }
+
+  static Future<void> saveBookContact(int bookId, String phone, String photoBase64) async {
+    await _ensureContactsTable();
+    final db = await DatabaseHelper.instance.database;
+    final cleanPhone = phone.trim();
+    if (cleanPhone.isEmpty && photoBase64.isEmpty) {
+      await db.delete('book_contacts', where: 'bookId = ?', whereArgs: [bookId]);
+      return;
+    }
+    await db.rawInsert(
+      'INSERT OR REPLACE INTO book_contacts (bookId, phone, photoBase64) VALUES (?, ?, ?)',
+      [bookId, cleanPhone, photoBase64],
+    );
+  }
+
+  static Future<Map<String, String>> getBookContact(int bookId) async {
+    await _ensureContactsTable();
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query('book_contacts', where: 'bookId = ?', whereArgs: [bookId]);
+    if (rows.isEmpty) return {'phone': '', 'photoBase64': ''};
+    return {
+      'phone': rows.first['phone']?.toString() ?? '',
+      'photoBase64': rows.first['photoBase64']?.toString() ?? '',
+    };
+  }
+
+  static Future<Map<int, Map<String, String>>> getAllBookContacts() async {
+    await _ensureContactsTable();
+    final db = await DatabaseHelper.instance.database;
+    final rows = await db.query('book_contacts');
+    final map = <int, Map<String, String>>{};
+    for (final r in rows) {
+      final id = r['bookId'] as int?;
+      if (id != null) {
+        map[id] = {
+          'phone': r['phone']?.toString() ?? '',
+          'photoBase64': r['photoBase64']?.toString() ?? '',
+        };
+      }
+    }
+    return map;
+  }
+
 
   static String? detectCategory(String name, {String smsBody = '', String currentCategory = ''}) {
     if (currentCategory.trim().isNotEmpty) return currentCategory.trim();
