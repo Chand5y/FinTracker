@@ -985,13 +985,9 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // SMART CREATE BOOK DIALOG (2 SUGGESTIONS PER ROW, COMPACT FONT)
+  // SMART CREATE & EDIT BOOK DIALOGS (WITH LENDING CONTACT PICKER)
   // ===========================================================================
-  Future<int?> _promptCreateBook() async {
-    HapticFeedback.lightImpact();
-    final ctrl = TextEditingController();
-    String selectedBookType = 'standard';
-    final currentMonthName = _monthNames[DateTime.now().month - 1];  Future<Map<String, String>?> _pickContactFromPhone() async {
+  Future<Map<String, String>?> _pickContactFromPhone() async {
     try {
       final res = await _nativeBridge.invokeMethod<Map<dynamic, dynamic>>('pickContact');
       if (res == null) return null;
@@ -1427,7 +1423,6 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-
   Future<void> _confirmAndDeleteBookWithUndo(int bookId, String bookName) async {
     HapticFeedback.mediumImpact();
     final bool? confirmed = await showDialog<bool>(
@@ -1679,7 +1674,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
                               ),
-                                child: Row(
+                              child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Expanded(
@@ -2172,7 +2167,7 @@ class _BooksScreenState extends State<BooksScreen> {
                               const SizedBox(height: 10),
                               Row(
                                 children: [
-                                                                    Container(
+                                  Container(
                                     padding: EdgeInsets.symmetric(
                                       horizontal: bankIconAsset != null ? 5 : 7,
                                       vertical: 3,
@@ -2197,7 +2192,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                             ),
                                           ),
                                   ),
-
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
@@ -2780,7 +2774,7 @@ class _BooksScreenState extends State<BooksScreen> {
                 autofocus: true,
                 style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 decoration: const InputDecoration(
-                  hintText: 'Search books...',
+                  hintText: 'Search books or phone number...',
                   border: InputBorder.none,
                 ),
                 onChanged: (val) => setState(() => _bookSearchQuery = val),
@@ -3028,7 +3022,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                                   ],
                                                 ),
                                                 const SizedBox(height: 6),
-                                                // Line 2: Clean 2-Line Metadata (Updated Time + Created Date Pill)
+                                                // Line 2: Clean 2-Line Metadata (Updated Time + Created on Date Pill)
                                                 Row(
                                                   children: [
                                                     Icon(Icons.schedule_rounded, size: 11.5, color: Colors.grey[500]),
