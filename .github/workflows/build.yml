@@ -45,7 +45,7 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrax --org com.chandsy .
 
-      - name: Register logo.png and assets/Icons/ in pubspec.yaml
+      - name: Register logo.png and assets/icons/ in pubspec.yaml
         run: |
           python3 - << 'EOF'
           import os
@@ -54,10 +54,10 @@ jobs:
               lines = f.readlines()
 
           asset_entries = ["    - logo.png\n"]
-          if os.path.isdir("assets/Icons"):
-              asset_entries.append("    - assets/Icons/\n")
           if os.path.isdir("assets/icons"):
               asset_entries.append("    - assets/icons/\n")
+          if os.path.isdir("assets/Icons"):
+              asset_entries.append("    - assets/Icons/\n")
 
           new_lines = []
           in_assets = False
@@ -103,7 +103,7 @@ jobs:
           echo "Using pre-installed NDK: $INSTALLED_NDK"
           sed -i "s/flutter.ndkVersion/\"$INSTALLED_NDK\"/g" android/app/build.gradle*
           sed -i 's/android:label="fintrax"/android:label="FinTrax"/g' android/app/src/main/AndroidManifest.xml
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="false" android:fullBackupOnly="false"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.READ_CONTACTS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="false" android:fullBackupOnly="false"/' android/app/src/main/AndroidManifest.xml
           sed -i 's/<\/application>/    <receiver android:name=".ReminderReceiver" android:exported="false"\/>\n    <\/application>/' android/app/src/main/AndroidManifest.xml
 
           if [ -f "android/app/build.gradle.kts" ]; then
@@ -439,6 +439,8 @@ jobs:
           import android.content.pm.PackageManager
           import android.net.Uri
           import android.os.Build
+          import android.provider.ContactsContract
+          import android.util.Base64
           import java.security.MessageDigest
           import io.flutter.embedding.android.FlutterActivity
           import io.flutter.embedding.engine.FlutterEngine
@@ -450,6 +452,7 @@ jobs:
               private var pendingAuthResult: MethodChannel.Result? = null
               private var pendingPdfResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
+              private var pendingContactResult: MethodChannel.Result? = null
               private var pendingInsightOpen: Boolean = false
 
               private fun getInstalledSha1(): String {
@@ -625,6 +628,16 @@ jobs:
                               }
                               result.success(true)
                           }
+                          "pickContact" -> {
+                              pendingContactResult = result
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                                  checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                                  requestPermissions(arrayOf(Manifest.permission.READ_CONTACTS), 1009)
+                              } else {
+                                  val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+                                  startActivityForResult(intent, 1008)
+                              }
+                          }
                           "openUrl" -> {
                               val url = call.argument<String>("url") ?: ""
                               try {
@@ -653,6 +666,14 @@ jobs:
                   if (requestCode == 1001) {
                       pendingSmsResult?.success(granted)
                       pendingSmsResult = null
+                  } else if (requestCode == 1009) {
+                      if (granted) {
+                          val intent = Intent(Intent.ACTION_PICK, ContactsContract.CommonDataKinds.Phone.CONTENT_URI)
+                          startActivityForResult(intent, 1008)
+                      } else {
+                          pendingContactResult?.success(null)
+                          pendingContactResult = null
+                      }
                   }
               }
 
@@ -678,6 +699,53 @@ jobs:
                           }
                           pendingPdfBytes = null
                           pendingPdfResult = null
+                      }
+                      1008 -> {
+                          if (resultCode == Activity.RESULT_OK && data?.data != null) {
+                              try {
+                                  val uri = data.data!!
+                                  var name = ""
+                                  var phone = ""
+                                  var photoUriStr = ""
+                                  contentResolver.query(
+                                      uri,
+                                      arrayOf(
+                                          ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                                          ContactsContract.CommonDataKinds.Phone.NUMBER,
+                                          ContactsContract.CommonDataKinds.Phone.PHOTO_URI
+                                      ),
+                                      null, null, null
+                                  )?.use { c ->
+                                      if (c.moveToFirst()) {
+                                          val nIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                                          val pIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                                          val phIdx = c.getColumnIndex(ContactsContract.CommonDataKinds.Phone.PHOTO_URI)
+                                          if (nIdx >= 0) name = c.getString(nIdx) ?: ""
+                                          if (pIdx >= 0) phone = c.getString(pIdx) ?: ""
+                                          if (phIdx >= 0) photoUriStr = c.getString(phIdx) ?: ""
+                                      }
+                                  }
+                                  var photoBase64 = ""
+                                  if (photoUriStr.isNotEmpty()) {
+                                      try {
+                                          contentResolver.openInputStream(Uri.parse(photoUriStr))?.use { input ->
+                                              val bytes = input.readBytes()
+                                              photoBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                                          }
+                                      } catch (_: Exception) {}
+                                  }
+                                  pendingContactResult?.success(mapOf(
+                                      "name" to name,
+                                      "phone" to phone,
+                                      "photoBase64" to photoBase64
+                                  ))
+                              } catch (e: Exception) {
+                                  pendingContactResult?.success(null)
+                              }
+                          } else {
+                              pendingContactResult?.success(null)
+                          }
+                          pendingContactResult = null
                       }
                   }
               }
