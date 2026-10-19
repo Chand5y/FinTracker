@@ -729,6 +729,7 @@ class _BooksScreenState extends State<BooksScreen> {
   ];
 
   int _tabIndex = 0;
+  late final PageController _tabPageController = PageController(initialPage: 0);
   List<Map<String, dynamic>> _books = [];
   List<ParsedSmsTransaction> _pendingSms = [];
   bool _loading = false;
@@ -750,6 +751,7 @@ class _BooksScreenState extends State<BooksScreen> {
   void dispose() {
     _autoBackupTimer?.cancel();
     _bookSearchController.dispose();
+    _tabPageController.dispose();
     super.dispose();
   }
 
@@ -827,130 +829,145 @@ class _BooksScreenState extends State<BooksScreen> {
 
   // ===========================================================================
   // DEDUPLICATED MONTHLY INSIGHTS ENGINE
-  // Counts multi-book copies only ONCE in overall totals & category breakdown,
-  // while keeping individual book totals accurate in "Spending by Book".
+  // Counts a transaction added to multiple books ONLY ONCE in overall totals
+  // and category breakdowns, while still showing per-book totals under Books.
   // ===========================================================================
   Future<Map<String, dynamic>> _getDeduplicatedMonthlyInsights(int year, int month) async {
-    final db = await DatabaseHelper.instance.database;
-    final prefix = '$year-${month.toString().padLeft(2, '0')}';
+    try {
+      final db = await DatabaseHelper.instance.database;
+      final startIso = DateTime(year, month, 1).toIso8601String();
+      final endIso = DateTime(year, month + 1, 1).toIso8601String();
 
-    final rows = await db.rawQuery('''
-      SELECT t.*, b.name as bookName, b.bookType as bookType
-      FROM transactions t
-      INNER JOIN books b ON t.bookId = b.id
-      WHERE t.date LIKE ?
-      ORDER BY t.id ASC
-    ''', ['$prefix%']);
+      final rows = await db.rawQuery('''
+        SELECT t.*, b.name AS bookName, b.bookType AS bookType
+        FROM transactions t
+        INNER JOIN books b ON t.bookId = b.id
+        WHERE t.date >= ? AND t.date < ?
+        ORDER BY t.date DESC
+      ''', [startIso, endIso]);
 
-    double totalIn = 0;
-    double totalOut = 0;
-    double shoppingSpend = 0;
-    double grocerySpend = 0;
-    double foodSpend = 0;
-    double lendingGiven = 0;
-    int uniqueStandardTxCount = 0;
+      double totalIn = 0.0;
+      double totalOut = 0.0;
+      double shoppingSpend = 0.0;
+      double grocerySpend = 0.0;
+      double foodSpend = 0.0;
+      double lendingGiven = 0.0;
+      int uniqueTxCount = 0;
 
-    final Map<String, double> catMap = {};
-    final Map<String, double> bookMap = {};
+      final Map<String, double> bookSpendMap = {};
+      final Map<String, Map<String, dynamic>> uniqueEntries = {};
 
-    // Group standard-book transactions by unique fingerprint so an entry added
-    // to 3 books is counted only once in overall spending & categories.
-    final Map<String, Map<String, dynamic>> uniqueStandardEntries = {};
+      for (final r in rows) {
+        final String bType = (r['bookType']?.toString() ?? 'standard').toLowerCase();
+        final String bName = r['bookName']?.toString() ?? 'Book';
+        final String txType = r['type']?.toString() ?? 'Expense';
+        final double amt = (r['amount'] as num?)?.toDouble() ?? 0.0;
+        final String rawName = (r['name']?.toString() ?? '').trim();
+        final String rawCat = (r['category']?.toString() ?? '').trim();
+        final String rawSms = (r['smsBody']?.toString() ?? '').trim();
+        final String rawDate = (r['date']?.toString() ?? '').trim();
 
-    for (final r in rows) {
-      final String bType = (r['bookType']?.toString() ?? 'standard').toLowerCase();
-      final String bName = r['bookName']?.toString() ?? 'Book';
-      final String tType = r['type']?.toString() ?? 'Expense';
-      final double amt = (r['amount'] as num?)?.toDouble() ?? 0.0;
-      final String rawName = (r['name']?.toString() ?? '').trim();
-      final String rawCat = (r['category']?.toString() ?? '').trim();
-      final String rawSms = (r['smsBody']?.toString() ?? '').trim();
-      final String rawDate = (r['date']?.toString() ?? '').trim();
-
-      if (bType == 'lending') {
-        if (tType == 'Expense') {
-          lendingGiven += amt;
+        if (bType == 'lending') {
+          if (txType == 'Expense') {
+            lendingGiven += amt;
+          }
+          continue;
         }
-        continue;
-      }
 
-      // Per-book breakdown always reflects what is inside each individual book
-      if (tType == 'Expense') {
-        bookMap[bName] = (bookMap[bName] ?? 0.0) + amt;
-      }
+        // Per-book spending breakdown includes all standard books where this entry resides
+        if (txType == 'Expense') {
+          bookSpendMap[bName] = (bookSpendMap[bName] ?? 0.0) + amt;
+        }
 
-      // Build deduplication fingerprint for multi-book entries
-      final String dateMinuteKey = rawDate.length >= 16 ? rawDate.substring(0, 16) : rawDate;
-      final String dedupKey = rawSms.isNotEmpty
-          ? '$tType|${amt.toStringAsFixed(2)}|SMS:$rawSms'
-          : '$tType|${amt.toStringAsFixed(2)}|${rawName.toLowerCase()}|$dateMinuteKey';
+        // Build a signature so the same transaction copied across multiple books is counted once
+        final String dateMinuteKey = rawDate.length >= 16 ? rawDate.substring(0, 16) : rawDate;
+        final String dedupKey = rawSms.isNotEmpty
+            ? '$txType|${amt.toStringAsFixed(2)}|$rawSms|$dateMinuteKey'
+            : '$txType|${amt.toStringAsFixed(2)}|${rawName.toLowerCase()}|$dateMinuteKey';
 
-      if (!uniqueStandardEntries.containsKey(dedupKey)) {
-        uniqueStandardEntries[dedupKey] = {
-          'type': tType,
-          'amount': amt,
-          'name': rawName,
-          'category': rawCat,
-          'smsBody': rawSms,
-        };
-      } else {
-        // If an earlier copy had no category but another book copy has a category, keep the category
-        final existing = uniqueStandardEntries[dedupKey]!;
-        if ((existing['category'] as String).isEmpty && rawCat.isNotEmpty) {
-          existing['category'] = rawCat;
+        final resolvedCat = FinTraxBrandHelper.detectCategory(
+              rawName,
+              smsBody: rawSms,
+              currentCategory: rawCat,
+            ) ??
+            rawCat;
+
+        if (!uniqueEntries.containsKey(dedupKey)) {
+          uniqueEntries[dedupKey] = {
+            'type': txType,
+            'amount': amt,
+            'name': rawName,
+            'category': resolvedCat,
+          };
+        } else {
+          // If one of the book copies has a category set, preserve the non-empty category
+          final existingCat = (uniqueEntries[dedupKey]!['category'] as String?) ?? '';
+          if (existingCat.isEmpty && resolvedCat.isNotEmpty) {
+            uniqueEntries[dedupKey]!['category'] = resolvedCat;
+          }
         }
       }
+
+      final Map<String, double> catMap = {};
+      for (final entry in uniqueEntries.values) {
+        uniqueTxCount++;
+        final String txType = entry['type'] as String;
+        final double amt = entry['amount'] as double;
+        final String cat = (entry['category'] as String).trim();
+        final String nameLower = (entry['name'] as String).toLowerCase();
+        final String catLower = cat.toLowerCase();
+
+        if (txType == 'Income') {
+          totalIn += amt;
+        } else {
+          totalOut += amt;
+          final String displayCat = cat.isEmpty ? 'Uncategorized' : cat;
+          catMap[displayCat] = (catMap[displayCat] ?? 0.0) + amt;
+
+          if (catLower.contains('shop') ||
+              nameLower.contains('flipkart') ||
+              nameLower.contains('amazon') ||
+              nameLower.contains('myntra') ||
+              nameLower.contains('meesho') ||
+              nameLower.contains('instamart')) {
+            shoppingSpend += amt;
+          } else if (catLower.contains('grocer') || nameLower.contains('grocer') || nameLower.contains('blinkit')) {
+            grocerySpend += amt;
+          } else if (catLower.contains('food') ||
+              catLower.contains('dining') ||
+              nameLower.contains('zomato') ||
+              nameLower.contains('swiggy') ||
+              nameLower.contains('dominos')) {
+            foodSpend += amt;
+          }
+        }
+      }
+
+      final categoryBreakdown = catMap.entries
+          .map((e) => {'name': e.key, 'amount': e.value})
+          .toList()
+        ..sort((a, b) => (b['amount'] as double).compareTo(a['amount'] as double));
+
+      final bookBreakdown = bookSpendMap.entries
+          .map((e) => {'name': e.key, 'amount': e.value})
+          .toList()
+        ..sort((a, b) => (b['amount'] as double).compareTo(a['amount'] as double));
+
+      return {
+        'totalIncome': totalIn,
+        'totalExpense': totalOut,
+        'netFlow': totalIn - totalOut,
+        'shoppingSpend': shoppingSpend,
+        'grocerySpend': grocerySpend,
+        'foodSpend': foodSpend,
+        'lendingGiven': lendingGiven,
+        'txCount': uniqueTxCount,
+        'categoryBreakdown': categoryBreakdown,
+        'bookBreakdown': bookBreakdown,
+      };
+    } catch (_) {
+      return DatabaseHelper.instance.getMonthlyInsights(year, month);
     }
-
-    for (final entry in uniqueStandardEntries.values) {
-      uniqueStandardTxCount++;
-      final String tType = entry['type'] as String;
-      final double amt = entry['amount'] as double;
-      final String name = entry['name'] as String;
-      final String smsBody = entry['smsBody'] as String;
-      final String resolvedCat = FinTraxBrandHelper.detectCategory(
-            name,
-            smsBody: smsBody,
-            currentCategory: entry['category'] as String,
-          ) ??
-          (entry['category'] as String);
-
-      if (tType == 'Income') {
-        totalIn += amt;
-      } else {
-        totalOut += amt;
-        final String displayCat = resolvedCat.isEmpty ? 'Uncategorized' : resolvedCat;
-        catMap[displayCat] = (catMap[displayCat] ?? 0.0) + amt;
-
-        final String lowerCat = displayCat.toLowerCase();
-        final String lowerName = name.toLowerCase();
-        if (lowerCat.contains('shop') || lowerName.contains('shop') || lowerName.contains('flipkart') || lowerName.contains('amazon') || lowerName.contains('myntra') || lowerName.contains('meesho')) {
-          shoppingSpend += amt;
-        }
-        if (lowerCat.contains('grocer') || lowerName.contains('grocer') || lowerName.contains('kirana') || lowerName.contains('vegetable') || lowerName.contains('milk')) {
-          grocerySpend += amt;
-        }
-        if (lowerCat.contains('food') || lowerCat.contains('dining') || lowerName.contains('zomato') || lowerName.contains('swiggy') || lowerName.contains('restaurant')) {
-          foodSpend += amt;
-        }
-      }
-    }
-
-    final sortedCats = catMap.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-    final sortedBooks = bookMap.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
-
-    return {
-      'totalIncome': totalIn,
-      'totalExpense': totalOut,
-      'netFlow': totalIn - totalOut,
-      'shoppingSpend': shoppingSpend,
-      'grocerySpend': grocerySpend,
-      'foodSpend': foodSpend,
-      'lendingGiven': lendingGiven,
-      'txCount': uniqueStandardTxCount,
-      'categoryBreakdown': sortedCats.map((e) => {'name': e.key, 'amount': e.value}).toList(),
-      'bookBreakdown': sortedBooks.map((e) => {'name': e.key, 'amount': e.value}).toList(),
-    };
   }
 
   Future<void> _checkAndShowFirstOfMonthInsights(Set<String> handledSet) async {
@@ -1092,23 +1109,7 @@ class _BooksScreenState extends State<BooksScreen> {
         if (item is Map) {
           final parsed = ParsedSmsTransaction.tryParse(item);
           if (parsed != null && !ignoredIds.contains(parsed.smsId)) {
-            final senderAddr = item['address']?.toString() ?? '';
-            final resolvedBank = FinTraxBrandHelper.detectPaymentMethod(
-              currentMode: parsed.paymentMode,
-              smsBody: parsed.body,
-              sender: '$senderAddr ${parsed.merchant}',
-            );
-            detected.add(
-              ParsedSmsTransaction(
-                smsId: parsed.smsId,
-                type: parsed.type,
-                amount: parsed.amount,
-                merchant: parsed.merchant,
-                body: parsed.body,
-                date: parsed.date,
-                paymentMode: resolvedBank,
-              ),
-            );
+            detected.add(parsed);
           }
         }
       }
@@ -2041,13 +2042,13 @@ class _BooksScreenState extends State<BooksScreen> {
                       itemBuilder: (ctx, i) {
                         final item = _pendingSms[i];
                         final isCredit = item.type == 'Income';
-                        final String resolvedBank = FinTraxBrandHelper.detectPaymentMethod(
+                        final String resolvedBankMode = FinTraxBrandHelper.detectPaymentMethod(
                           currentMode: item.paymentMode,
                           smsBody: item.body,
                           sender: item.merchant,
                         );
                         final String? bankAsset = FinTraxBrandHelper.getPaymentIconAsset(
-                          resolvedBank,
+                          resolvedBankMode,
                           smsBody: item.body,
                           sender: item.merchant,
                         );
@@ -2115,13 +2116,13 @@ class _BooksScreenState extends State<BooksScreen> {
                                       children: [
                                         FinTraxBrandHelper.buildIconBadge(
                                           assetPath: bankAsset,
-                                          fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedBank),
+                                          fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedBankMode),
                                           size: 13,
                                           borderRadius: 3,
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          resolvedBank,
+                                          resolvedBankMode,
                                           style: TextStyle(
                                             fontSize: 10.5,
                                             fontWeight: FontWeight.w700,
@@ -2256,12 +2257,12 @@ class _BooksScreenState extends State<BooksScreen> {
 
     if (targetBookId != null && targetBookId > 0 && mounted) {
       HapticFeedback.lightImpact();
-      final detectedMode = FinTraxBrandHelper.detectPaymentMethod(
+      final String detectedBankMode = FinTraxBrandHelper.detectPaymentMethod(
         currentMode: sms.paymentMode,
         smsBody: sms.body,
         sender: sms.merchant,
       );
-      final detectedCat = FinTraxBrandHelper.detectCategory(
+      final String autoCategory = FinTraxBrandHelper.detectCategory(
             sms.merchant,
             smsBody: sms.body,
           ) ??
@@ -2273,12 +2274,12 @@ class _BooksScreenState extends State<BooksScreen> {
         type: sms.type,
         amount: sms.amount,
         name: sms.merchant,
-        category: detectedCat,
+        category: autoCategory,
         notes: '',
         smsBody: sms.body,
         date: sms.date,
         currency: AppConstants.defaultCurrency,
-        paymentMode: detectedMode,
+        paymentMode: detectedBankMode,
       );
 
       final added = await Navigator.push<bool>(
@@ -2903,7 +2904,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                     child: Padding(
                                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                       child: Row(
-                                        crossAxisAlignment: CrossAxisAlignment.center,
                                         children: [
                                           Container(
                                             padding: const EdgeInsets.all(11),
@@ -2932,7 +2932,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                // Row 1: Full-width Book Name + Net Balance
+                                                // Top Row: Full-width Book Name + Net Balance
                                                 Row(
                                                   crossAxisAlignment: CrossAxisAlignment.center,
                                                   children: [
@@ -2956,15 +2956,12 @@ class _BooksScreenState extends State<BooksScreen> {
                                                   ],
                                                 ),
                                                 const SizedBox(height: 6),
-                                                // Row 2: Lending badge + Created date pill + Updated timestamp
-                                                Wrap(
-                                                  spacing: 6,
-                                                  runSpacing: 4,
-                                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                                // Second Row: LENDING pill + Updated time + Created date pill
+                                                Row(
                                                   children: [
-                                                    if (isLending)
+                                                    if (isLending) ...[
                                                       Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.8),
+                                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                                         decoration: BoxDecoration(
                                                           color: AppConstants.goldAccent.withOpacity(0.18),
                                                           borderRadius: BorderRadius.circular(5),
@@ -2980,35 +2977,38 @@ class _BooksScreenState extends State<BooksScreen> {
                                                           ),
                                                         ),
                                                       ),
+                                                      const SizedBox(width: 6),
+                                                    ],
+                                                    Icon(Icons.schedule_rounded, size: 11.5, color: Colors.grey[500]),
+                                                    const SizedBox(width: 3.5),
+                                                    Expanded(
+                                                      child: Text(
+                                                        AppConstants.formatOrdinalDateTime(updatedDate),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 10.5,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 6),
                                                     Container(
                                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                       decoration: BoxDecoration(
                                                         color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
-                                                        borderRadius: BorderRadius.circular(6),
+                                                        borderRadius: BorderRadius.circular(5),
                                                       ),
                                                       child: Text(
                                                         'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
                                                         style: TextStyle(
-                                                          fontSize: 9.5,
+                                                          fontSize: 8.5,
+                                                          letterSpacing: -0.2,
                                                           fontWeight: FontWeight.w500,
                                                           color: isDark ? Colors.grey[400] : Colors.grey[600],
                                                         ),
                                                       ),
-                                                    ),
-                                                    Row(
-                                                      mainAxisSize: MainAxisSize.min,
-                                                      children: [
-                                                        Icon(Icons.schedule_rounded, size: 11, color: Colors.grey[500]),
-                                                        const SizedBox(width: 3),
-                                                        Text(
-                                                          AppConstants.formatOrdinalDateTime(updatedDate),
-                                                          style: TextStyle(
-                                                            fontSize: 10.5,
-                                                            fontWeight: FontWeight.w500,
-                                                            color: isDark ? Colors.grey[500] : Colors.grey[600],
-                                                          ),
-                                                        ),
-                                                      ],
                                                     ),
                                                   ],
                                                 ),
@@ -3406,34 +3406,17 @@ class _BooksScreenState extends State<BooksScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final prefs = Provider.of<ThemeProvider>(context);
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 260),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (Widget child, Animation<double> animation) {
-          final isBooks = child.key == const ValueKey('books_tab');
-          final offsetTween = Tween<Offset>(
-            begin: Offset(isBooks ? -1.0 : 1.0, 0.0),
-            end: Offset.zero,
-          );
-          return ClipRect(
-            child: SlideTransition(
-              position: offsetTween.animate(animation),
-              child: child,
-            ),
-          );
+      body: PageView(
+        controller: _tabPageController,
+        onPageChanged: (idx) {
+          if (_tabIndex != idx) {
+            setState(() => _tabIndex = idx);
+          }
         },
-        layoutBuilder: (Widget? currentChild, List<Widget> previousChildren) {
-          return Stack(
-            children: <Widget>[
-              ...previousChildren,
-              if (currentChild != null) currentChild,
-            ],
-          );
-        },
-        child: _tabIndex == 0
-            ? KeyedSubtree(key: const ValueKey('books_tab'), child: _buildBooksTab(isDark, prefs.useMaterialYou))
-            : KeyedSubtree(key: const ValueKey('settings_tab'), child: _buildSettingsTab(context, isDark)),
+        children: [
+          _buildBooksTab(isDark, prefs.useMaterialYou),
+          _buildSettingsTab(context, isDark),
+        ],
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
@@ -3443,6 +3426,11 @@ class _BooksScreenState extends State<BooksScreen> {
           if (_tabIndex == idx) return;
           HapticFeedback.selectionClick();
           setState(() => _tabIndex = idx);
+          _tabPageController.animateToPage(
+            idx,
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+          );
         },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.book_outlined), selectedIcon: Icon(Icons.book_rounded), label: 'Books'),
