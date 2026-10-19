@@ -736,6 +736,7 @@ class _BooksScreenState extends State<BooksScreen> {
   int _tabIndex = 0;
   late final PageController _tabPageController = PageController(initialPage: 0);
   List<Map<String, dynamic>> _books = [];
+  Map<int, Map<String, String>> _bookContacts = {};
   List<ParsedSmsTransaction> _pendingSms = [];
   bool _loading = false;
   bool _showOnboarding = false;
@@ -925,9 +926,11 @@ class _BooksScreenState extends State<BooksScreen> {
         }
       });
 
+      final contactsMap = await FinTraxBrandHelper.getAllBookContacts();
       if (mounted) {
         setState(() {
           _books = rows;
+          _bookContacts = contactsMap;
           _loading = false;
         });
       }
@@ -987,6 +990,26 @@ class _BooksScreenState extends State<BooksScreen> {
   Future<int?> _promptCreateBook() async {
     HapticFeedback.lightImpact();
     final ctrl = TextEditingController();
+    String selectedBookType = 'standard';
+    final currentMonthName = _monthNames[DateTime.now().month - 1];  Future<Map<String, String>?> _pickContactFromPhone() async {
+    try {
+      final res = await _nativeBridge.invokeMethod<Map<dynamic, dynamic>>('pickContact');
+      if (res == null) return null;
+      return {
+        'name': res['name']?.toString() ?? '',
+        'phone': res['phone']?.toString() ?? '',
+        'photoBase64': res['photoBase64']?.toString() ?? '',
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<int?> _promptCreateBook() async {
+    HapticFeedback.lightImpact();
+    final ctrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    String pickedPhotoBase64 = '';
     String selectedBookType = 'standard';
     final currentMonthName = _monthNames[DateTime.now().month - 1];
 
@@ -1219,6 +1242,36 @@ class _BooksScreenState extends State<BooksScreen> {
                         ),
                       ],
                     ),
+                    if (selectedBookType == 'lending') ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          labelText: 'Contact Number (Optional)',
+                          hintText: 'Enter or import from contacts',
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          suffixIcon: IconButton(
+                            tooltip: 'Import from Contacts',
+                            icon: Icon(Icons.contacts_rounded, color: scheme.primary),
+                            onPressed: () async {
+                              HapticFeedback.selectionClick();
+                              final picked = await _pickContactFromPhone();
+                              if (picked != null) {
+                                setDialogState(() {
+                                  phoneCtrl.text = picked['phone'] ?? '';
+                                  pickedPhotoBase64 = picked['photoBase64'] ?? '';
+                                  if (ctrl.text.trim().isEmpty && (picked['name'] ?? '').isNotEmpty) {
+                                    ctrl.text = picked['name']!;
+                                  }
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Text(
                       'QUICK SUGGESTIONS',
@@ -1256,6 +1309,9 @@ class _BooksScreenState extends State<BooksScreen> {
                       );
                     }
                   } else {
+                    if (selectedBookType == 'lending') {
+                      await FinTraxBrandHelper.saveBookContact(id, phoneCtrl.text, pickedPhotoBase64);
+                    }
                     HapticFeedback.mediumImpact();
                     await _loadBooks();
                     if (ctx.mounted) Navigator.pop(ctx, id);
@@ -1270,8 +1326,12 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  void _promptRenameBook(int id, String oldName, String currentType) {
+  Future<void> _promptRenameBook(int id, String oldName, String currentType) async {
+    final existingContact = await FinTraxBrandHelper.getBookContact(id);
+    if (!mounted) return;
     final ctrl = TextEditingController(text: oldName);
+    final phoneCtrl = TextEditingController(text: existingContact['phone'] ?? '');
+    String pickedPhotoBase64 = existingContact['photoBase64'] ?? '';
     String selectedType = currentType;
 
     showDialog(
@@ -1280,28 +1340,57 @@ class _BooksScreenState extends State<BooksScreen> {
         builder: (ctx, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('Rename / Edit Book', style: TextStyle(fontWeight: FontWeight.w700)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ctrl,
-                autofocus: true,
-                textCapitalization: TextCapitalization.words,
-                decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
-              ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                title: const Text('Lending Ledger', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
-                subtitle: const Text('Mark this book for money lent/borrowed', style: TextStyle(fontSize: 11)),
-                value: selectedType == 'lending',
-                onChanged: (v) {
-                  HapticFeedback.selectionClick();
-                  setDialogState(() => selectedType = v ? 'lending' : 'standard');
-                },
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: ctrl,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('Lending Ledger', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                  subtitle: const Text('Mark this book for money lent/borrowed', style: TextStyle(fontSize: 11)),
+                  value: selectedType == 'lending',
+                  onChanged: (v) {
+                    HapticFeedback.selectionClick();
+                    setDialogState(() => selectedType = v ? 'lending' : 'standard');
+                  },
+                ),
+                if (selectedType == 'lending') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: phoneCtrl,
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      labelText: 'Contact Number (Optional)',
+                      hintText: 'Enter or import from contacts',
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      suffixIcon: IconButton(
+                        tooltip: 'Import from Contacts',
+                        icon: Icon(Icons.contacts_rounded, color: Theme.of(ctx).colorScheme.primary),
+                        onPressed: () async {
+                          HapticFeedback.selectionClick();
+                          final picked = await _pickContactFromPhone();
+                          if (picked != null) {
+                            setDialogState(() {
+                              phoneCtrl.text = picked['phone'] ?? '';
+                              pickedPhotoBase64 = picked['photoBase64'] ?? '';
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -1322,6 +1411,9 @@ class _BooksScreenState extends State<BooksScreen> {
                     }
                     return;
                   }
+                  if (selectedType == 'lending') {
+                    await FinTraxBrandHelper.saveBookContact(id, phoneCtrl.text, pickedPhotoBase64);
+                  }
                   HapticFeedback.mediumImpact();
                   if (ctx.mounted) Navigator.pop(ctx);
                   _loadBooks();
@@ -1334,6 +1426,7 @@ class _BooksScreenState extends State<BooksScreen> {
       ),
     );
   }
+
 
   Future<void> _confirmAndDeleteBookWithUndo(int bookId, String bookName) async {
     HapticFeedback.mediumImpact();
@@ -1586,13 +1679,18 @@ class _BooksScreenState extends State<BooksScreen> {
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
                               ),
-                              child: Row(
+                                child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'Net Monthly Savings / Flow ($txCount unique ${txCount == 1 ? 'entry' : 'entries'})',
-                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.grey[500]),
+                                  Expanded(
+                                    child: Text(
+                                      'Net Monthly Savings / Flow ($txCount unique ${txCount == 1 ? 'entry' : 'entries'})',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[500]),
+                                    ),
                                   ),
+                                  const SizedBox(width: 8),
                                   Text(
                                     '${netFlow < 0 ? '-' : '+'}${AppConstants.defaultCurrency}${netFlow.abs().toStringAsFixed(0)}',
                                     style: TextStyle(
@@ -2074,33 +2172,32 @@ class _BooksScreenState extends State<BooksScreen> {
                               const SizedBox(height: 10),
                               Row(
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                                                    Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: bankIconAsset != null ? 5 : 7,
+                                      vertical: 3,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        FinTraxBrandHelper.buildIconBadge(
-                                          assetPath: bankIconAsset,
-                                          fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedMode),
-                                          size: 13,
-                                          borderRadius: 3,
-                                        ),
-                                        const SizedBox(width: 5),
-                                        Text(
-                                          resolvedMode,
-                                          style: TextStyle(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: isDark ? Colors.grey[300] : Colors.grey[800],
+                                    child: bankIconAsset != null
+                                        ? FinTraxBrandHelper.buildIconBadge(
+                                            assetPath: bankIconAsset,
+                                            fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedMode),
+                                            size: 16,
+                                            borderRadius: 3,
+                                          )
+                                        : Text(
+                                            resolvedMode,
+                                            style: TextStyle(
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: isDark ? Colors.grey[300] : Colors.grey[800],
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
                                   ),
+
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
@@ -2661,14 +2758,19 @@ class _BooksScreenState extends State<BooksScreen> {
     final now = DateTime.now();
     final prevMonthName = _monthNames[DateTime(now.year, now.month - 1, 1).month - 1];
 
-    final filteredBooks = _bookSearchQuery.trim().isEmpty
+    final query = _bookSearchQuery.trim().toLowerCase();
+    final digitsQuery = query.replaceAll(RegExp(r'[^0-9]'), '');
+    final filteredBooks = query.isEmpty
         ? _books
-        : _books
-            .where((b) => b['name']
-                .toString()
-                .toLowerCase()
-                .contains(_bookSearchQuery.trim().toLowerCase()))
-            .toList();
+        : _books.where((b) {
+            final nameMatch = b['name'].toString().toLowerCase().contains(query);
+            final bookId = b['id'] as int;
+            final savedPhone = (_bookContacts[bookId]?['phone'] ?? '').toLowerCase();
+            final savedDigits = savedPhone.replaceAll(RegExp(r'[^0-9]'), '');
+            final phoneMatch = savedPhone.contains(query) ||
+                (digitsQuery.isNotEmpty && savedDigits.contains(digitsQuery));
+            return nameMatch || phoneMatch;
+          }).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -2951,7 +3053,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                                         borderRadius: BorderRadius.circular(5),
                                                       ),
                                                       child: Text(
-                                                        'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
+                                                        'Created on: ${AppConstants.formatOrdinalDate(createdDate)}',
                                                         style: TextStyle(
                                                           fontSize: 8.5,
                                                           letterSpacing: -0.2,
