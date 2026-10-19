@@ -750,8 +750,8 @@ class _BooksScreenState extends State<BooksScreen> {
   @override
   void dispose() {
     _autoBackupTimer?.cancel();
-    _bookSearchController.dispose();
     _tabPageController.dispose();
+    _bookSearchController.dispose();
     super.dispose();
   }
 
@@ -827,149 +827,6 @@ class _BooksScreenState extends State<BooksScreen> {
     _autoBackupTimer = Timer(nextRun.difference(now), _runSilentDailyBackup);
   }
 
-  // ===========================================================================
-  // DEDUPLICATED MONTHLY INSIGHTS ENGINE
-  // Counts a transaction added to multiple books ONLY ONCE in overall totals
-  // and category breakdowns, while still showing per-book totals under Books.
-  // ===========================================================================
-  Future<Map<String, dynamic>> _getDeduplicatedMonthlyInsights(int year, int month) async {
-    try {
-      final db = await DatabaseHelper.instance.database;
-      final startIso = DateTime(year, month, 1).toIso8601String();
-      final endIso = DateTime(year, month + 1, 1).toIso8601String();
-
-      final rows = await db.rawQuery('''
-        SELECT t.*, b.name AS bookName, b.bookType AS bookType
-        FROM transactions t
-        INNER JOIN books b ON t.bookId = b.id
-        WHERE t.date >= ? AND t.date < ?
-        ORDER BY t.date DESC
-      ''', [startIso, endIso]);
-
-      double totalIn = 0.0;
-      double totalOut = 0.0;
-      double shoppingSpend = 0.0;
-      double grocerySpend = 0.0;
-      double foodSpend = 0.0;
-      double lendingGiven = 0.0;
-      int uniqueTxCount = 0;
-
-      final Map<String, double> bookSpendMap = {};
-      final Map<String, Map<String, dynamic>> uniqueEntries = {};
-
-      for (final r in rows) {
-        final String bType = (r['bookType']?.toString() ?? 'standard').toLowerCase();
-        final String bName = r['bookName']?.toString() ?? 'Book';
-        final String txType = r['type']?.toString() ?? 'Expense';
-        final double amt = (r['amount'] as num?)?.toDouble() ?? 0.0;
-        final String rawName = (r['name']?.toString() ?? '').trim();
-        final String rawCat = (r['category']?.toString() ?? '').trim();
-        final String rawSms = (r['smsBody']?.toString() ?? '').trim();
-        final String rawDate = (r['date']?.toString() ?? '').trim();
-
-        if (bType == 'lending') {
-          if (txType == 'Expense') {
-            lendingGiven += amt;
-          }
-          continue;
-        }
-
-        // Per-book spending breakdown includes all standard books where this entry resides
-        if (txType == 'Expense') {
-          bookSpendMap[bName] = (bookSpendMap[bName] ?? 0.0) + amt;
-        }
-
-        // Build a signature so the same transaction copied across multiple books is counted once
-        final String dateMinuteKey = rawDate.length >= 16 ? rawDate.substring(0, 16) : rawDate;
-        final String dedupKey = rawSms.isNotEmpty
-            ? '$txType|${amt.toStringAsFixed(2)}|$rawSms|$dateMinuteKey'
-            : '$txType|${amt.toStringAsFixed(2)}|${rawName.toLowerCase()}|$dateMinuteKey';
-
-        final resolvedCat = FinTraxBrandHelper.detectCategory(
-              rawName,
-              smsBody: rawSms,
-              currentCategory: rawCat,
-            ) ??
-            rawCat;
-
-        if (!uniqueEntries.containsKey(dedupKey)) {
-          uniqueEntries[dedupKey] = {
-            'type': txType,
-            'amount': amt,
-            'name': rawName,
-            'category': resolvedCat,
-          };
-        } else {
-          // If one of the book copies has a category set, preserve the non-empty category
-          final existingCat = (uniqueEntries[dedupKey]!['category'] as String?) ?? '';
-          if (existingCat.isEmpty && resolvedCat.isNotEmpty) {
-            uniqueEntries[dedupKey]!['category'] = resolvedCat;
-          }
-        }
-      }
-
-      final Map<String, double> catMap = {};
-      for (final entry in uniqueEntries.values) {
-        uniqueTxCount++;
-        final String txType = entry['type'] as String;
-        final double amt = entry['amount'] as double;
-        final String cat = (entry['category'] as String).trim();
-        final String nameLower = (entry['name'] as String).toLowerCase();
-        final String catLower = cat.toLowerCase();
-
-        if (txType == 'Income') {
-          totalIn += amt;
-        } else {
-          totalOut += amt;
-          final String displayCat = cat.isEmpty ? 'Uncategorized' : cat;
-          catMap[displayCat] = (catMap[displayCat] ?? 0.0) + amt;
-
-          if (catLower.contains('shop') ||
-              nameLower.contains('flipkart') ||
-              nameLower.contains('amazon') ||
-              nameLower.contains('myntra') ||
-              nameLower.contains('meesho') ||
-              nameLower.contains('instamart')) {
-            shoppingSpend += amt;
-          } else if (catLower.contains('grocer') || nameLower.contains('grocer') || nameLower.contains('blinkit')) {
-            grocerySpend += amt;
-          } else if (catLower.contains('food') ||
-              catLower.contains('dining') ||
-              nameLower.contains('zomato') ||
-              nameLower.contains('swiggy') ||
-              nameLower.contains('dominos')) {
-            foodSpend += amt;
-          }
-        }
-      }
-
-      final categoryBreakdown = catMap.entries
-          .map((e) => {'name': e.key, 'amount': e.value})
-          .toList()
-        ..sort((a, b) => (b['amount'] as double).compareTo(a['amount'] as double));
-
-      final bookBreakdown = bookSpendMap.entries
-          .map((e) => {'name': e.key, 'amount': e.value})
-          .toList()
-        ..sort((a, b) => (b['amount'] as double).compareTo(a['amount'] as double));
-
-      return {
-        'totalIncome': totalIn,
-        'totalExpense': totalOut,
-        'netFlow': totalIn - totalOut,
-        'shoppingSpend': shoppingSpend,
-        'grocerySpend': grocerySpend,
-        'foodSpend': foodSpend,
-        'lendingGiven': lendingGiven,
-        'txCount': uniqueTxCount,
-        'categoryBreakdown': categoryBreakdown,
-        'bookBreakdown': bookBreakdown,
-      };
-    } catch (_) {
-      return DatabaseHelper.instance.getMonthlyInsights(year, month);
-    }
-  }
-
   Future<void> _checkAndShowFirstOfMonthInsights(Set<String> handledSet) async {
     try {
       bool launchedFromInsightNotif = false;
@@ -991,7 +848,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
       if (!handledSet.contains(markerKey)) {
         final prevMonthDate = DateTime(now.year, now.month - 1, 1);
-        final insights = await _getDeduplicatedMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
+        final insights = await DatabaseHelper.instance.getMonthlyInsights(prevMonthDate.year, prevMonthDate.month);
         final int txCount = (insights['txCount'] as int?) ?? 0;
         final double lendingGiven = (insights['lendingGiven'] as num?)?.toDouble() ?? 0.0;
         await DatabaseHelper.instance.markSmsHandled(markerKey, 'shown');
@@ -1472,7 +1329,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // MONTHLY FINANCIAL INSIGHTS MODAL (DEDUPLICATED ACROSS MULTI-BOOK COPIES)
+  // MONTHLY FINANCIAL INSIGHTS MODAL (1ST OF MONTH & ANYTIME VIEW)
   // ===========================================================================
   void _openMonthlyInsightsSheet({bool initialPreviousMonth = true}) {
     HapticFeedback.lightImpact();
@@ -1577,7 +1434,7 @@ class _BooksScreenState extends State<BooksScreen> {
                   const Divider(height: 1),
                   Flexible(
                     child: FutureBuilder<Map<String, dynamic>>(
-                      future: _getDeduplicatedMonthlyInsights(targetDate.year, targetDate.month),
+                      future: DatabaseHelper.instance.getMonthlyInsights(targetDate.year, targetDate.month),
                       builder: (ctx, snap) {
                         if (!snap.hasData) {
                           return const Padding(
@@ -1660,7 +1517,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                 children: [
                                   Text(
                                     'Net Monthly Savings / Flow ($txCount unique ${txCount == 1 ? 'entry' : 'entries'})',
-                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[500]),
+                                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.grey[500]),
                                   ),
                                   Text(
                                     '${netFlow < 0 ? '-' : '+'}${AppConstants.defaultCurrency}${netFlow.abs().toStringAsFixed(0)}',
@@ -2042,17 +1899,22 @@ class _BooksScreenState extends State<BooksScreen> {
                       itemBuilder: (ctx, i) {
                         final item = _pendingSms[i];
                         final isCredit = item.type == 'Income';
-                        final String resolvedBankMode = FinTraxBrandHelper.detectPaymentMethod(
+
+                        final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
                           currentMode: item.paymentMode,
                           smsBody: item.body,
                           sender: item.merchant,
                         );
-                        final String? bankAsset = FinTraxBrandHelper.getPaymentIconAsset(
-                          resolvedBankMode,
+                        final String? bankIconAsset = FinTraxBrandHelper.getPaymentIconAsset(
+                          resolvedMode,
                           smsBody: item.body,
                           sender: item.merchant,
                         );
-                        final String? merchantAsset = FinTraxBrandHelper.getMerchantIconAsset(
+                        final String? merchantIconAsset = FinTraxBrandHelper.getMerchantIconAsset(
+                          item.merchant,
+                          smsBody: item.body,
+                        );
+                        final String? autoCat = FinTraxBrandHelper.detectCategory(
                           item.merchant,
                           smsBody: item.body,
                         );
@@ -2065,11 +1927,11 @@ class _BooksScreenState extends State<BooksScreen> {
                               Expanded(
                                 child: Row(
                                   children: [
-                                    if (merchantAsset != null) ...[
+                                    if (merchantIconAsset != null) ...[
                                       ClipRRect(
                                         borderRadius: BorderRadius.circular(5),
                                         child: Image.asset(
-                                          merchantAsset,
+                                          merchantIconAsset,
                                           width: 18,
                                           height: 18,
                                           fit: BoxFit.contain,
@@ -2088,6 +1950,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                   ],
                                 ),
                               ),
+                              const SizedBox(width: 8),
                               Text(
                                 '${isCredit ? '+' : '-'}${AppConstants.defaultCurrency}${item.amount.toStringAsFixed(0)}',
                                 style: TextStyle(
@@ -2115,14 +1978,14 @@ class _BooksScreenState extends State<BooksScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         FinTraxBrandHelper.buildIconBadge(
-                                          assetPath: bankAsset,
-                                          fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedBankMode),
+                                          assetPath: bankIconAsset,
+                                          fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(resolvedMode),
                                           size: 13,
                                           borderRadius: 3,
                                         ),
-                                        const SizedBox(width: 4),
+                                        const SizedBox(width: 5),
                                         Text(
-                                          resolvedBankMode,
+                                          resolvedMode,
                                           style: TextStyle(
                                             fontSize: 10.5,
                                             fontWeight: FontWeight.w700,
@@ -2135,7 +1998,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
-                                      AppConstants.formatOrdinalDateTime(item.date),
+                                      '${autoCat != null ? '$autoCat • ' : ''}${AppConstants.formatOrdinalDateTime(item.date)}',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(fontSize: 10.5, color: Colors.grey),
@@ -2257,7 +2120,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
     if (targetBookId != null && targetBookId > 0 && mounted) {
       HapticFeedback.lightImpact();
-      final String detectedBankMode = FinTraxBrandHelper.detectPaymentMethod(
+      final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
         currentMode: sms.paymentMode,
         smsBody: sms.body,
         sender: sms.merchant,
@@ -2279,7 +2142,7 @@ class _BooksScreenState extends State<BooksScreen> {
         smsBody: sms.body,
         date: sms.date,
         currency: AppConstants.defaultCurrency,
-        paymentMode: detectedBankMode,
+        paymentMode: resolvedMode,
       );
 
       final added = await Navigator.push<bool>(
@@ -2902,7 +2765,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                       bookType,
                                     ),
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                                       child: Row(
                                         children: [
                                           Container(
@@ -2932,7 +2795,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                // Top Row: Full-width Book Name + Net Balance
+                                                // Line 1: Full-width Book Title + Balance Amount
                                                 Row(
                                                   crossAxisAlignment: CrossAxisAlignment.center,
                                                   children: [
@@ -2941,7 +2804,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                                         item['name'].toString(),
                                                         maxLines: 1,
                                                         overflow: TextOverflow.ellipsis,
-                                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                                                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16.5),
                                                       ),
                                                     ),
                                                     const SizedBox(width: 10),
@@ -2949,19 +2812,58 @@ class _BooksScreenState extends State<BooksScreen> {
                                                       '${isNeg ? '-' : ''}${AppConstants.defaultCurrency}${balance.abs().toStringAsFixed(0)}',
                                                       style: TextStyle(
                                                         fontWeight: FontWeight.w800,
-                                                        fontSize: 16,
+                                                        fontSize: 16.5,
                                                         color: isNeg ? AppConstants.expenseRed : AppConstants.incomeGreen,
                                                       ),
                                                     ),
                                                   ],
                                                 ),
-                                                const SizedBox(height: 6),
-                                                // Second Row: LENDING pill + Updated time + Created date pill
+                                                const SizedBox(height: 5),
+                                                // Line 2: Updated Date & Time (and Created pill for standard books)
                                                 Row(
                                                   children: [
-                                                    if (isLending) ...[
+                                                    Icon(Icons.schedule_rounded, size: 11.5, color: Colors.grey[500]),
+                                                    const SizedBox(width: 4),
+                                                    Expanded(
+                                                      child: Text(
+                                                        AppConstants.formatOrdinalDateTime(updatedDate),
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: isDark ? Colors.grey[500] : Colors.grey[600],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    if (!isLending) ...[
+                                                      const SizedBox(width: 6),
                                                       Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                        decoration: BoxDecoration(
+                                                          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                                                          borderRadius: BorderRadius.circular(5),
+                                                        ),
+                                                        child: Text(
+                                                          'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
+                                                          style: TextStyle(
+                                                            fontSize: 8.5,
+                                                            letterSpacing: -0.2,
+                                                            fontWeight: FontWeight.w500,
+                                                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                                // Line 3 (Only for Lending books): Lending Badge + Created Date Pill
+                                                if (isLending) ...[
+                                                  const SizedBox(height: 5),
+                                                  Row(
+                                                    children: [
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                         decoration: BoxDecoration(
                                                           color: AppConstants.goldAccent.withOpacity(0.18),
                                                           borderRadius: BorderRadius.circular(5),
@@ -2977,41 +2879,26 @@ class _BooksScreenState extends State<BooksScreen> {
                                                           ),
                                                         ),
                                                       ),
-                                                      const SizedBox(width: 6),
+                                                      const Spacer(),
+                                                      Container(
+                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                        decoration: BoxDecoration(
+                                                          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                                                          borderRadius: BorderRadius.circular(5),
+                                                        ),
+                                                        child: Text(
+                                                          'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
+                                                          style: TextStyle(
+                                                            fontSize: 8.5,
+                                                            letterSpacing: -0.2,
+                                                            fontWeight: FontWeight.w500,
+                                                            color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                                          ),
+                                                        ),
+                                                      ),
                                                     ],
-                                                    Icon(Icons.schedule_rounded, size: 11.5, color: Colors.grey[500]),
-                                                    const SizedBox(width: 3.5),
-                                                    Expanded(
-                                                      child: Text(
-                                                        AppConstants.formatOrdinalDateTime(updatedDate),
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow.ellipsis,
-                                                        style: TextStyle(
-                                                          fontSize: 10.5,
-                                                          fontWeight: FontWeight.w500,
-                                                          color: isDark ? Colors.grey[500] : Colors.grey[600],
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    const SizedBox(width: 6),
-                                                    Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                      decoration: BoxDecoration(
-                                                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
-                                                        borderRadius: BorderRadius.circular(5),
-                                                      ),
-                                                      child: Text(
-                                                        'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
-                                                        style: TextStyle(
-                                                          fontSize: 8.5,
-                                                          letterSpacing: -0.2,
-                                                          fontWeight: FontWeight.w500,
-                                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
+                                                  ),
+                                                ],
                                               ],
                                             ),
                                           ),
@@ -3410,12 +3297,13 @@ class _BooksScreenState extends State<BooksScreen> {
         controller: _tabPageController,
         onPageChanged: (idx) {
           if (_tabIndex != idx) {
+            HapticFeedback.selectionClick();
             setState(() => _tabIndex = idx);
           }
         },
         children: [
-          _buildBooksTab(isDark, prefs.useMaterialYou),
-          _buildSettingsTab(context, isDark),
+          KeyedSubtree(key: const ValueKey('books_tab'), child: _buildBooksTab(isDark, prefs.useMaterialYou)),
+          KeyedSubtree(key: const ValueKey('settings_tab'), child: _buildSettingsTab(context, isDark)),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -3423,7 +3311,6 @@ class _BooksScreenState extends State<BooksScreen> {
         backgroundColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
         elevation: 0,
         onDestinationSelected: (idx) {
-          if (_tabIndex == idx) return;
           HapticFeedback.selectionClick();
           setState(() => _tabIndex = idx);
           _tabPageController.animateToPage(
