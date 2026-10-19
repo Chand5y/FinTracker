@@ -10,6 +10,8 @@ import '../data/transaction_model.dart';
 // SHARED BANK ICON, MERCHANT ICON & AUTO-CATEGORIZATION HELPER
 // ===========================================================================
 class FinTraxBrandHelper {
+  static final ValueNotifier<int> dataRefreshNotifier = ValueNotifier<int>(0);
+
   static const List<Map<String, String>> paymentMethods = [
     {'name': 'Cash', 'emoji': '💵', 'asset': ''},
     {'name': 'UPI', 'emoji': '📱', 'asset': 'assets/icons/upi.png'},
@@ -32,6 +34,74 @@ class FinTraxBrandHelper {
     {'name': 'Bank Transfer', 'emoji': '🏦', 'asset': ''},
     {'name': 'Online', 'emoji': '🌐', 'asset': 'assets/icons/upi.png'},
   ];
+
+  /// Replaces raw SMS sender headers (like JK-UTKSPR-S or UTKSPR-S) with the actual
+  /// merchant name found inside the SMS body (e.g., Flipkart).
+  static String resolveMerchantTitle(String currentName, String smsBody) {
+    final trimmed = currentName.trim();
+    final lowerName = trimmed.toLowerCase();
+    final lowerSms = smsBody.toLowerCase();
+
+    final bool isRawSenderCode = trimmed.isEmpty ||
+        lowerName.contains('utkspr') ||
+        lowerName.contains('airbnk') ||
+        lowerName.contains('kbankt') ||
+        lowerName.contains('sbipsg') ||
+        lowerName.contains('hdfcbk') ||
+        lowerName.contains('icicib') ||
+        lowerName.contains('axisbk') ||
+        lowerName.contains('bobtxn') ||
+        RegExp(r'^[a-z]{2}-[a-z0-9-]+$', caseSensitive: false).hasMatch(trimmed) ||
+        RegExp(r'^[a-z0-9]{5,8}-[sptg]$', caseSensitive: false).hasMatch(trimmed);
+
+    if (!isRawSenderCode) {
+      return trimmed;
+    }
+
+    // 1. Check for known merchants/brands inside the SMS body
+    if (lowerSms.contains('flipkart')) return 'Flipkart';
+    if (lowerSms.contains('instamart')) return 'Swiggy Instamart';
+    if (lowerSms.contains('swiggy')) return 'Swiggy';
+    if (lowerSms.contains('zomato')) return 'Zomato';
+    if (lowerSms.contains('blinkit')) return 'Blinkit';
+    if (lowerSms.contains('amazon') || lowerSms.contains('amzn')) return 'Amazon';
+    if (lowerSms.contains('myntra')) return 'Myntra';
+    if (lowerSms.contains('meesho')) return 'Meesho';
+    if (lowerSms.contains('dominos') || lowerSms.contains("domino's")) return 'Dominos';
+    if (lowerSms.contains('zerodha')) return 'Zerodha';
+    if (lowerSms.contains('groww')) return 'Groww';
+    if (lowerSms.contains('upstox')) return 'Upstox';
+    if (lowerSms.contains('angel one') || lowerSms.contains('angelbroking')) return 'Angel One';
+    if (lowerSms.contains('indmoney')) return 'INDmoney';
+    if (lowerSms.contains('kuvera')) return 'Kuvera';
+    if (lowerSms.contains('jio')) return 'Jio';
+
+    // 2. Extract merchant from "spent on your SuperCard at <MERCHANT>." or "at <MERCHANT>"
+    final atMatch = RegExp(
+      r'(?:supercard\s+at|spent\s+at|paid\s+to|sent\s+to|trf\s+to)\s+([A-Za-z0-9][A-Za-z0-9 &._-]{1,30}?)(?:\s+internet\s+priva|\s+pvt|\s+private|\s+on\b|\s+available\b|\.|\s*$)',
+      caseSensitive: false,
+    ).firstMatch(smsBody);
+    if (atMatch != null) {
+      final extracted = atMatch.group(1)?.trim() ?? '';
+      if (extracted.isNotEmpty) {
+        return _toTitleCase(extracted);
+      }
+    }
+
+    if (lowerSms.contains('received payment') && lowerSms.contains('supercard')) {
+      return 'SuperCard Bill Payment';
+    }
+
+    return trimmed.isEmpty ? 'Bank Transaction' : trimmed;
+  }
+
+  static String _toTitleCase(String input) {
+    return input
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+        .join(' ');
+  }
 
   static String detectPaymentMethod({
     String currentMode = '',
@@ -132,6 +202,33 @@ class FinTraxBrandHelper {
     if (currentCategory.trim().isNotEmpty) return currentCategory.trim();
     final text = '$name $smsBody'.toLowerCase();
 
+    // 1. Investment: SIP, Mutual Funds, Stock purchases, Brokers
+    if (RegExp(r'\bsip\b').hasMatch(text) ||
+        text.contains('mutual fund') ||
+        RegExp(r'\bmf\b').hasMatch(text) ||
+        text.contains('folio') ||
+        text.contains('units allotted') ||
+        RegExp(r'\bnav\b').hasMatch(text) ||
+        text.contains('zerodha') ||
+        text.contains('groww') ||
+        text.contains('upstox') ||
+        text.contains('angel one') ||
+        text.contains('angelbroking') ||
+        text.contains('indmoney') ||
+        text.contains('kuvera') ||
+        text.contains('etmoney') ||
+        text.contains('smallcase') ||
+        text.contains('stock') ||
+        text.contains('equity') ||
+        text.contains('demat') ||
+        text.contains('cdsl') ||
+        text.contains('nsdl') ||
+        RegExp(r'\bnse\b').hasMatch(text) ||
+        RegExp(r'\bbse\b').hasMatch(text)) {
+      return 'Investment';
+    }
+
+    // 2. Shopping / E-commerce
     if (text.contains('instamart') ||
         text.contains('flipkart') ||
         text.contains('amazon') ||
@@ -143,6 +240,7 @@ class FinTraxBrandHelper {
       return 'Shopping';
     }
 
+    // 3. Food & Dining
     if (text.contains('zomato') ||
         text.contains('swiggy') ||
         text.contains('dominos') ||
@@ -236,6 +334,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   List<Map<String, String>> get _allCategories {
     final list = List<Map<String, String>>.from(AppConstants.categories);
+    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'investment')) {
+      list.add({'name': 'Investment', 'emoji': '📈'});
+    }
     if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'emi')) {
       list.add({'name': 'EMI', 'emoji': '🏦'});
     }
@@ -256,12 +357,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _amountController = TextEditingController(
       text: widget.existingTransaction != null ? widget.existingTransaction!.amount.toStringAsFixed(0) : '',
     );
-    _nameController = TextEditingController(text: widget.existingTransaction?.name ?? '');
+
+    _smsText = widget.existingTransaction?.effectiveSmsText ?? '';
+    final rawName = widget.existingTransaction?.name ?? '';
+    final resolvedTitle = _smsText.isNotEmpty
+        ? FinTraxBrandHelper.resolveMerchantTitle(rawName, _smsText)
+        : rawName;
+
+    _nameController = TextEditingController(text: resolvedTitle);
     _notesController = TextEditingController(
       text: widget.isSmsDraft ? '' : (widget.existingTransaction?.notes ?? ''),
     );
 
-    _smsText = widget.existingTransaction?.effectiveSmsText ?? '';
     final existingCat = widget.existingTransaction?.category ?? '';
     _selectedCategory = FinTraxBrandHelper.detectCategory(
       _nameController.text,
@@ -273,7 +380,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     _paymentMode = FinTraxBrandHelper.detectPaymentMethod(
       currentMode: initialMode,
       smsBody: _smsText,
-      sender: _nameController.text,
+      sender: rawName,
     );
 
     _imagePaths = FinTraxBrandHelper.parseImagePaths(widget.existingTransaction?.imagePath ?? '');
@@ -342,16 +449,66 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     }
   }
 
-  Future<void> _confirmAndDeleteEntry() async {
-    if (!_isEditingExisting) return;
+  Future<void> _confirmAndDeleteImage(int idx) async {
     HapticFeedback.mediumImpact();
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Delete Entry?', style: TextStyle(fontWeight: FontWeight.w800)),
+        title: const Text('Do you want to delete?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: const Text(
+          'Remove this attached image from the entry?',
+          style: TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppConstants.expenseRed, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final String removedPath = _imagePaths[idx];
+      setState(() => _imagePaths.removeAt(idx));
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: const Text('Image removed'),
+          action: SnackBarAction(
+            label: 'UNDO',
+            textColor: AppConstants.goldAccent,
+            onPressed: () {
+              if (mounted) {
+                setState(() {
+                  final insertPos = idx.clamp(0, _imagePaths.length);
+                  _imagePaths.insert(insertPos, removedPath);
+                });
+              }
+            },
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmAndDeleteEntry() async {
+    if (!_isEditingExisting) return;
+    HapticFeedback.mediumImpact();
+    final txToBackup = widget.existingTransaction!;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Do you want to delete?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
         content: Text(
-          'Are you sure you want to delete "${widget.existingTransaction!.name}" from this book?',
+          'Delete "${txToBackup.name}" from this book?',
           style: const TextStyle(fontSize: 13.5, height: 1.4),
         ),
         actions: [
@@ -367,8 +524,29 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
     if (confirmed == true && mounted) {
       HapticFeedback.heavyImpact();
-      await DatabaseHelper.instance.deleteTransaction(widget.existingTransaction!.id!, widget.bookId);
-      if (mounted) Navigator.pop(context, true);
+      final backupMap = txToBackup.toMap();
+      await DatabaseHelper.instance.deleteTransaction(txToBackup.id!, widget.bookId);
+      if (!mounted) return;
+
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context, true);
+
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text('Deleted "${txToBackup.name}"'),
+          action: SnackBarAction(
+            label: 'UNDO',
+            textColor: AppConstants.goldAccent,
+            onPressed: () async {
+              final db = await DatabaseHelper.instance.database;
+              await db.insert('transactions', backupMap);
+              FinTraxBrandHelper.dataRefreshNotifier.value++;
+            },
+          ),
+        ),
+      );
     }
   }
 
@@ -1252,7 +1430,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                               child: IconButton(
                                 padding: EdgeInsets.zero,
                                 icon: const Icon(Icons.close, size: 15, color: Colors.white),
-                                onPressed: () => setState(() => _imagePaths.removeAt(idx)),
+                                onPressed: () => _confirmAndDeleteImage(idx),
                               ),
                             ),
                           ),
