@@ -12,25 +12,25 @@ import '../data/transaction_model.dart';
 class FinTraxBrandHelper {
   static const List<Map<String, String>> paymentMethods = [
     {'name': 'Cash', 'emoji': '💵', 'asset': ''},
-    {'name': 'UPI', 'emoji': '📱', 'asset': 'assets/Icons/upi.png'},
-    {'name': 'Airtel', 'emoji': '🏦', 'asset': 'assets/Icons/airtel.png'},
-    {'name': 'Utkarsh SFBL', 'emoji': '💳', 'asset': 'assets/Icons/Utkarsh.png'},
-    {'name': 'Kotak Bank', 'emoji': '🏦', 'asset': 'assets/Icons/kotak.png'},
-    {'name': 'SBI', 'emoji': '🏦', 'asset': 'assets/Icons/sbi.png'},
-    {'name': 'ICICI Bank', 'emoji': '🏦', 'asset': 'assets/Icons/icici.png'},
-    {'name': 'Bank of Baroda', 'emoji': '🏦', 'asset': 'assets/Icons/Baroda.png'},
-    {'name': 'IPPB', 'emoji': '🏦', 'asset': 'assets/Icons/ippb.png'},
-    {'name': 'Google Pay', 'emoji': '📱', 'asset': 'assets/Icons/Gpay.png'},
-    {'name': 'PhonePe', 'emoji': '📱', 'asset': 'assets/Icons/PhonePe.png'},
-    {'name': 'Paytm', 'emoji': '📱', 'asset': 'assets/Icons/paytm.png'},
-    {'name': 'SuperMoney', 'emoji': '⚡', 'asset': 'assets/Icons/SuperMoney.png'},
-    {'name': 'Slice', 'emoji': '💳', 'asset': 'assets/Icons/slice.png'},
-    {'name': 'Navi', 'emoji': '📱', 'asset': 'assets/Icons/navi.png'},
-    {'name': 'PayPal', 'emoji': '🌐', 'asset': 'assets/Icons/paypal.png'},
-    {'name': 'JioPay', 'emoji': '📱', 'asset': 'assets/Icons/jio.png'},
+    {'name': 'UPI', 'emoji': '📱', 'asset': 'assets/icons/upi.png'},
+    {'name': 'Airtel', 'emoji': '🏦', 'asset': 'assets/icons/airtel.png'},
+    {'name': 'Utkarsh SFBL', 'emoji': '💳', 'asset': 'assets/icons/Utkarsh.png'},
+    {'name': 'Kotak Bank', 'emoji': '🏦', 'asset': 'assets/icons/kotak.png'},
+    {'name': 'SBI', 'emoji': '🏦', 'asset': 'assets/icons/sbi.png'},
+    {'name': 'ICICI Bank', 'emoji': '🏦', 'asset': 'assets/icons/icici.png'},
+    {'name': 'Bank of Baroda', 'emoji': '🏦', 'asset': 'assets/icons/Baroda.png'},
+    {'name': 'IPPB', 'emoji': '🏦', 'asset': 'assets/icons/ippb.png'},
+    {'name': 'Google Pay', 'emoji': '📱', 'asset': 'assets/icons/Gpay.png'},
+    {'name': 'PhonePe', 'emoji': '📱', 'asset': 'assets/icons/PhonePe.png'},
+    {'name': 'Paytm', 'emoji': '📱', 'asset': 'assets/icons/paytm.png'},
+    {'name': 'SuperMoney', 'emoji': '⚡', 'asset': 'assets/icons/SuperMoney.png'},
+    {'name': 'Slice', 'emoji': '💳', 'asset': 'assets/icons/slice.png'},
+    {'name': 'Navi', 'emoji': '📱', 'asset': 'assets/icons/navi.png'},
+    {'name': 'PayPal', 'emoji': '🌐', 'asset': 'assets/icons/paypal.png'},
+    {'name': 'JioPay', 'emoji': '📱', 'asset': 'assets/icons/jio.png'},
     {'name': 'Card', 'emoji': '💳', 'asset': ''},
     {'name': 'Bank Transfer', 'emoji': '🏦', 'asset': ''},
-    {'name': 'Online', 'emoji': '🌐', 'asset': 'assets/Icons/upi.png'},
+    {'name': 'Online', 'emoji': '🌐', 'asset': 'assets/icons/upi.png'},
   ];
 
   static String detectPaymentMethod({
@@ -117,14 +117,14 @@ class FinTraxBrandHelper {
 
   static String? getMerchantIconAsset(String name, {String smsBody = ''}) {
     final text = '$name $smsBody'.toLowerCase();
-    if (text.contains('flipkart')) return 'assets/Icons/Flipkart.png';
-    if (text.contains('amazon') || text.contains('amzn')) return 'assets/Icons/amazon.png';
-    if (text.contains('myntra')) return 'assets/Icons/Myntra.png';
-    if (text.contains('meesho')) return 'assets/Icons/meesho.png';
-    if (text.contains('swiggy') || text.contains('instamart')) return 'assets/Icons/swiggy.png';
-    if (text.contains('zomato') || text.contains('blinkit')) return 'assets/Icons/zomato.png';
-    if (text.contains('jio')) return 'assets/Icons/jio.png';
-    if (text.contains('airtel')) return 'assets/Icons/airtel.png';
+    if (text.contains('flipkart')) return 'assets/icons/Flipkart.png';
+    if (text.contains('amazon') || text.contains('amzn')) return 'assets/icons/amazon.png';
+    if (text.contains('myntra')) return 'assets/icons/Myntra.png';
+    if (text.contains('meesho')) return 'assets/icons/meesho.png';
+    if (text.contains('swiggy') || text.contains('instamart')) return 'assets/icons/swiggy.png';
+    if (text.contains('zomato') || text.contains('blinkit')) return 'assets/icons/zomato.png';
+    if (text.contains('jio')) return 'assets/icons/jio.png';
+    if (text.contains('airtel')) return 'assets/icons/airtel.png';
     return null;
   }
 
@@ -177,9 +177,6 @@ class FinTraxBrandHelper {
     double borderRadius = 6,
   }) {
     if (assetPath != null && assetPath.isNotEmpty) {
-      final String altCasePath = assetPath.contains('/upi.png')
-          ? assetPath.replaceAll('/upi.png', '/UPI.png')
-          : assetPath;
       return ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: Image.asset(
@@ -187,18 +184,7 @@ class FinTraxBrandHelper {
           width: size,
           height: size,
           fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) {
-            if (altCasePath != assetPath) {
-              return Image.asset(
-                altCasePath,
-                width: size,
-                height: size,
-                fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78)),
-              );
-            }
-            return Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78));
-          },
+          errorBuilder: (_, __, ___) => Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78)),
         ),
       );
     }
