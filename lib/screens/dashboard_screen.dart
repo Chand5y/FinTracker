@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -283,6 +284,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<TransactionModel> _transactions = [];
   bool _isLoading = true;
   late String _bookType;
+  String _contactPhone = '';
+  Uint8List? _contactPhotoBytes;
 
   @override
   void initState() {
@@ -305,12 +308,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final data = await DatabaseHelper.instance.readTransactionsForBook(widget.bookId);
       final books = await DatabaseHelper.instance.getBooksWithBalances();
       final match = books.where((b) => (b['id'] as int) == widget.bookId).toList();
+      final contactInfo = await FinTraxBrandHelper.getBookContact(widget.bookId);
+      final String photoB64 = contactInfo['photoBase64'] ?? '';
+      Uint8List? decodedPhoto;
+      if (photoB64.isNotEmpty) {
+        try {
+          decodedPhoto = base64Decode(photoB64);
+        } catch (_) {}
+      }
       if (mounted) {
         setState(() {
           _transactions = data;
           if (match.isNotEmpty) {
             _bookType = match.first['bookType']?.toString() ?? widget.bookType;
           }
+          _contactPhone = contactInfo['phone'] ?? '';
+          _contactPhotoBytes = decodedPhoto;
         });
       }
     } catch (e) {
@@ -321,6 +334,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
   }
+
 
   double _calculateTotal(String type) {
     return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
@@ -681,13 +695,51 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
               ),
             ),
-            child: Column(
+              child: Column(
               children: [
+                if (isLending && (_contactPhone.isNotEmpty || _contactPhotoBytes != null)) ...[
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 21,
+                        backgroundColor: AppConstants.goldAccent.withOpacity(0.18),
+                        backgroundImage: _contactPhotoBytes != null ? MemoryImage(_contactPhotoBytes!) : null,
+                        child: _contactPhotoBytes == null
+                            ? const Icon(Icons.person_rounded, color: AppConstants.goldAccent, size: 22)
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.bookName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5),
+                            ),
+                            if (_contactPhone.isNotEmpty)
+                              Text(
+                                _contactPhone,
+                                style: TextStyle(fontSize: 12.5, color: Colors.grey[500], fontWeight: FontWeight.w600),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: Divider(height: 1),
+                  ),
+                ],
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       isLending ? 'Net Pending / Balance' : 'Net Balance',
+
                       style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[700], fontSize: 15, fontWeight: FontWeight.w500),
                     ),
                     Text(
@@ -803,34 +855,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
+                                                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Expanded(
-                                        child: Row(
-                                          children: [
-                                            if (merchantIconAsset != null) ...[
-                                              ClipRRect(
-                                                borderRadius: BorderRadius.circular(6),
-                                                child: Image.asset(
-                                                  merchantIconAsset,
-                                                  width: 20,
-                                                  height: 20,
-                                                  fit: BoxFit.contain,
-                                                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                            ],
-                                            Expanded(
-                                              child: Text(
-                                                displayTitle,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-                                              ),
-                                            ),
-                                          ],
+                                        child: Text(
+                                          displayTitle,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
@@ -859,32 +892,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Row(
                                     children: [
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: bankIconAsset != null ? 5 : 8,
+                                          vertical: 3.5,
+                                        ),
                                         decoration: BoxDecoration(
                                           color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
                                           borderRadius: BorderRadius.circular(6),
                                         ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            FinTraxBrandHelper.buildIconBadge(
-                                              assetPath: bankIconAsset,
-                                              fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(displayPaymentMode),
-                                              size: 14,
-                                              borderRadius: 3,
-                                            ),
-                                            const SizedBox(width: 5),
-                                            Text(
-                                              displayPaymentMode,
-                                              style: TextStyle(
-                                                fontSize: 10.5,
-                                                fontWeight: FontWeight.w700,
-                                                color: isDark ? Colors.grey[300] : Colors.grey[800],
+                                        child: bankIconAsset != null
+                                            ? FinTraxBrandHelper.buildIconBadge(
+                                                assetPath: bankIconAsset,
+                                                fallbackEmoji: FinTraxBrandHelper.getPaymentEmoji(displayPaymentMode),
+                                                size: 18,
+                                                borderRadius: 4,
+                                              )
+                                            : Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    FinTraxBrandHelper.getPaymentEmoji(displayPaymentMode),
+                                                    style: const TextStyle(fontSize: 11),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    displayPaymentMode,
+                                                    style: TextStyle(
+                                                      fontSize: 10.5,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: isDark ? Colors.grey[300] : Colors.grey[800],
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                          ],
-                                        ),
-                                      ),
                                       const SizedBox(width: 8),
                                       Text(AppConstants.formatOrdinalDateTime(tx.date), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                                       const Spacer(),
