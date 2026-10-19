@@ -353,31 +353,31 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
     });
   }
 
-  Widget _featureTile(bool isDark, IconData icon, String title, String subtitle) {
+  Widget _featureTile(bool isDark, IconData icon, String title, String subtitle, {double bottomSpacing = 16}) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 11),
+      padding: EdgeInsets.only(bottom: bottomSpacing),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(9),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: scheme.primary.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(11),
+              borderRadius: BorderRadius.circular(13),
             ),
-            child: Icon(icon, size: 19, color: scheme.primary),
+            child: Icon(icon, size: 21, color: scheme.primary),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.8)),
-                const SizedBox(height: 1.5),
+                Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+                const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: TextStyle(fontSize: 12, height: 1.35, color: isDark ? Colors.grey[400] : Colors.grey[700]),
+                  style: TextStyle(fontSize: 12.5, height: 1.4, color: isDark ? Colors.grey[400] : Colors.grey[700]),
                 ),
               ],
             ),
@@ -406,7 +406,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
       child: Scaffold(
         body: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+            padding: const EdgeInsets.fromLTRB(22, 14, 22, 18),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -420,29 +420,29 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                           style: TextStyle(
                             color: isDark ? Colors.white : const Color(0xFF0E1726),
                             fontWeight: FontWeight.w800,
-                            fontSize: 25,
+                            fontSize: 26,
                           ),
                         ),
                         Text(
                           'Trax',
-                          style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w300, fontSize: 25),
+                          style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w300, fontSize: 26),
                         ),
                       ],
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4.5),
                       decoration: BoxDecoration(
                         color: scheme.primary.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         'Step ${_step + 1} of 3',
-                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: scheme.primary),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: scheme.primary),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
                 Expanded(
                   child: SingleChildScrollView(
                     child: _step == 0
@@ -451,94 +451,96 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                             children: [
                               Center(
                                 child: Container(
-                                  width: 62,
-                                  height: 62,
+                                  width: 72,
+                                  height: 72,
                                   margin: const EdgeInsets.only(top: 4),
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(15),
+                                    borderRadius: BorderRadius.circular(18),
                                     boxShadow: [
                                       BoxShadow(
                                         color: Colors.black.withOpacity(0.18),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 4),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 5),
                                       ),
                                     ],
                                   ),
                                   child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(15),
-                                    child: Image.asset('logo.png', width: 62, height: 62, fit: BoxFit.cover),
+                                    borderRadius: BorderRadius.circular(18),
+                                    child: Image.asset('logo.png', width: 72, height: 72, fit: BoxFit.cover),
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 14),
                               const Center(
                                 child: Text(
                                   'Know Where Your Money Goes',
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, height: 1.2),
+                                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                 ),
                               ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Tracking expenses shouldn\'t feel like homework. FinTrax keeps your daily money habits simple, private, and effortless.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 12.5, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                              const SizedBox(height: 8),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: Text(
+                                  'Tracking expenses shouldn\'t feel like homework. FinTrax keeps your daily money habits simple, private, and effortless.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(fontSize: 13, height: 1.45, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                ),
                               ),
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 20),
                               _featureTile(
                                 isDark,
                                 Icons.menu_book_rounded,
                                 'Separate Books for Everything',
                                 'Keep monthly bills, groceries, shopping, or money lent to friends neatly organized.',
+                                bottomSpacing: 15,
                               ),
                               _featureTile(
                                 isDark,
                                 Icons.sms_outlined,
                                 '1-Tap Bank & UPI Entries',
                                 'Spots your bank and UPI alerts automatically so you don\'t have to type them out.',
+                                bottomSpacing: 15,
                               ),
                               _featureTile(
                                 isDark,
                                 Icons.library_add_check_rounded,
                                 'Multi-Book Logging & Monthly Insights',
                                 'Save one expense into multiple books at once, export PDFs, and see a clear summary every month.',
+                                bottomSpacing: 15,
                               ),
                               _featureTile(
                                 isDark,
                                 Icons.cloud_done_outlined,
                                 'Biometric Lock & Google Drive Backup',
                                 'Lock the app with your fingerprint and back up to your own Google Drive so your data stays safe even when switching phones.',
+                                bottomSpacing: 18,
                               ),
-                              const SizedBox(height: 4),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                 decoration: BoxDecoration(
                                   color: AppConstants.incomeGreen.withOpacity(isDark ? 0.12 : 0.08),
-                                  borderRadius: BorderRadius.circular(14),
+                                  borderRadius: BorderRadius.circular(16),
                                   border: Border.all(color: AppConstants.incomeGreen.withOpacity(0.35)),
                                 ),
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 19),
-                                    const SizedBox(width: 9),
+                                    const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 20),
+                                    const SizedBox(width: 10),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const FittedBox(
-                                            fit: BoxFit.scaleDown,
-                                            alignment: Alignment.centerLeft,
-                                            child: Text(
-                                              '100% Offline • Zero Data Collection • Zero Ads',
-                                              maxLines: 1,
-                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
-                                            ),
+                                          const Text(
+                                            'Offline • Zero Data Collection • Zero Ads',
+                                            maxLines: 1,
+                                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
                                           ),
-                                          const SizedBox(height: 2),
+                                          const SizedBox(height: 3),
                                           Text(
                                             'Everything stays on your phone. No servers, no tracking, and no ads.',
-                                            style: TextStyle(fontSize: 11.5, height: 1.35, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                            style: TextStyle(fontSize: 11.8, height: 1.38, color: isDark ? Colors.grey[300] : Colors.grey[800]),
                                           ),
                                         ],
                                       ),
@@ -552,132 +554,189 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                             ? Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 10),
                                   Center(
                                     child: Container(
-                                      padding: const EdgeInsets.all(15),
+                                      width: 74,
+                                      height: 74,
+                                      alignment: Alignment.center,
                                       decoration: BoxDecoration(
                                         color: scheme.primary.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(18),
+                                        borderRadius: BorderRadius.circular(22),
                                       ),
-                                      child: Icon(Icons.notifications_active_rounded, size: 34, color: scheme.primary),
+                                      child: Icon(Icons.notifications_active_rounded, size: 36, color: scheme.primary),
                                     ),
                                   ),
-                                  const SizedBox(height: 14),
+                                  const SizedBox(height: 16),
                                   const Center(
                                     child: Text(
                                       'A Friendly 9:00 PM Check-In',
                                       textAlign: TextAlign.center,
-                                      style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, height: 1.2),
+                                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
-                                  Text(
-                                    'The easiest way to stay aware of your spending is taking 30 seconds at night to log today\'s expenses while you still remember them.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(fontSize: 12.8, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    child: Text(
+                                      'The easiest way to stay aware of your spending is taking 30 seconds at night to log today\'s expenses while you still remember them.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 13, height: 1.45, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                    ),
                                   ),
-                                  const SizedBox(height: 18),
+                                  const SizedBox(height: 24),
                                   _featureTile(
                                     isDark,
                                     Icons.schedule_rounded,
                                     'Daily Evening Reminder',
                                     'A quick nudge at 9:00 PM so small cash or UPI spends don\'t slip your mind. Change the time or turn it off anytime.',
+                                    bottomSpacing: 20,
                                   ),
                                   _featureTile(
                                     isDark,
                                     Icons.insights_rounded,
                                     '1st-of-the-Month Recap',
                                     'Wake up on the 1st to a ready-made summary of last month\'s shopping, groceries, investments, and savings.',
+                                    bottomSpacing: 20,
                                   ),
                                   _featureTile(
                                     isDark,
                                     Icons.do_not_disturb_on_outlined,
                                     'No Spam, Ever',
-                                    'We never send promotional messages or unnecessary alerts—only the reminders you actually want.',
+                                    'We never send promotional messages or unnecessary alerts—only the reminders you actually choose to enable.',
+                                    bottomSpacing: 24,
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF161922) : const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.tune_rounded, size: 20, color: scheme.primary),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            'You are always in full control: change the check-in time or pause notifications anytime with one tap in Settings.',
+                                            style: TextStyle(fontSize: 12, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[700]),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               )
                             : Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const SizedBox(height: 6),
+                                  const SizedBox(height: 8),
                                   Center(
                                     child: Container(
-                                      padding: const EdgeInsets.all(15),
+                                      width: 74,
+                                      height: 74,
+                                      alignment: Alignment.center,
                                       decoration: BoxDecoration(
                                         color: AppConstants.incomeGreen.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(18),
+                                        borderRadius: BorderRadius.circular(22),
                                       ),
-                                      child: const Icon(Icons.lock_outline_rounded, size: 34, color: AppConstants.incomeGreen),
+                                      child: const Icon(Icons.lock_outline_rounded, size: 36, color: AppConstants.incomeGreen),
                                     ),
                                   ),
-                                  const SizedBox(height: 14),
+                                  const SizedBox(height: 16),
                                   const Center(
                                     child: Text(
                                       'Save Time with Offline SMS Detection',
                                       textAlign: TextAlign.center,
-                                      style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, height: 1.2),
+                                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.25),
                                     ),
                                   ),
                                   const SizedBox(height: 8),
-                                  Text(
-                                    'It\'s completely normal to be cautious about SMS permission. Here is how FinTrax uses it while keeping your messages 100% private:',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(fontSize: 12.8, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    child: Text(
+                                      'It\'s completely normal to be cautious about SMS permission. Here is how FinTrax uses it while keeping your messages 100% private:',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 13, height: 1.45, color: isDark ? Colors.grey[300] : Colors.grey[800]),
+                                    ),
                                   ),
-                                  const SizedBox(height: 16),
+                                  const SizedBox(height: 20),
                                   _featureTile(
                                     isDark,
                                     Icons.bolt_rounded,
                                     'No More Manual Typing',
                                     'Spots bank debit and credit alerts to pre-fill the amount and merchant for you in one tap.',
+                                    bottomSpacing: 16,
                                   ),
                                   _featureTile(
                                     isDark,
                                     Icons.receipt_long_rounded,
                                     'Original SMS Saved for Reference',
                                     'Automatically attaches the transaction SMS to your entry so you always have the payment reference.',
+                                    bottomSpacing: 16,
                                   ),
                                   _featureTile(
                                     isDark,
                                     Icons.phonelink_lock_rounded,
                                     'Never Leaves Your Phone',
                                     'All scanning happens locally offline. FinTrax has no servers, so nobody can ever read your messages.',
+                                    bottomSpacing: 16,
                                   ),
                                   _featureTile(
                                     isDark,
                                     Icons.shield_outlined,
                                     'OTPs & Personal Texts Ignored',
                                     'Personal chats and OTP codes are completely skipped—only bank transaction alerts are picked up.',
+                                    bottomSpacing: 18,
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: isDark ? const Color(0xFF161922) : const Color(0xFFF8FAFC),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.offline_bolt_outlined, size: 20, color: AppConstants.incomeGreen),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Text(
+                                            'FinTrax operates 100% on-device. SMS detection works even in airplane mode with no internet connection.',
+                                            style: TextStyle(fontSize: 12, height: 1.4, color: isDark ? Colors.grey[300] : Colors.grey[700]),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 if (_step == 0)
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                     onPressed: () {
                       HapticFeedback.lightImpact();
                       setState(() => _step = 1);
                     },
                     icon: const Icon(Icons.arrow_forward_rounded),
-                    label: const Text('Continue to Set Up', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    label: const Text('Continue to Set Up', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                   )
                 else if (_step == 1) ...[
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                     onPressed: () => _handleNotificationStep(true),
                     icon: const Icon(Icons.notifications_active_outlined),
-                    label: const Text('Enable Reminders & Continue', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    label: const Text('Enable Reminders & Continue', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                   ),
                   const SizedBox(height: 4),
                   TextButton(
@@ -687,12 +746,12 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                 ] else ...[
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                     ),
                     onPressed: () => _handleSmsStep(true),
                     icon: const Icon(Icons.verified_user_outlined),
-                    label: const Text('Allow SMS Auto-Track & Start', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                    label: const Text('Allow SMS Auto-Track & Start', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700)),
                   ),
                   const SizedBox(height: 4),
                   TextButton(
@@ -3367,14 +3426,10 @@ class _BooksScreenState extends State<BooksScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const FittedBox(
-                        fit: BoxFit.scaleDown,
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          '100% Offline • Zero Data Collection • Zero Ads',
-                          maxLines: 1,
-                          style: TextStyle(fontSize: 12.2, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
-                        ),
+                      const Text(
+                        'Offline • Zero Data Collection • Zero Ads',
+                        maxLines: 1,
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
                       ),
                       const SizedBox(height: 3),
                       Text(
