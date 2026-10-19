@@ -225,6 +225,7 @@ class DashboardScreen extends StatefulWidget {
                 ...List.generate(transactions.length, (idx) {
                   final tx = transactions[idx];
                   final bool isIncome = tx.type == 'Income';
+                  final String resolvedTitle = FinTraxBrandHelper.resolveMerchantTitle(tx.name, tx.effectiveSmsText);
                   final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
                     currentMode: tx.paymentMode,
                     smsBody: tx.effectiveSmsText,
@@ -239,7 +240,7 @@ class DashboardScreen extends StatefulWidget {
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(8),
-                        child: pw.Text(tx.name, style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: navyBg)),
+                        child: pw.Text(resolvedTitle, style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: navyBg)),
                       ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(8),
@@ -287,7 +288,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _bookType = widget.bookType;
+    FinTraxBrandHelper.dataRefreshNotifier.addListener(_refreshTransactions);
     _refreshTransactions();
+  }
+
+  @override
+  void dispose() {
+    FinTraxBrandHelper.dataRefreshNotifier.removeListener(_refreshTransactions);
+    super.dispose();
   }
 
   Future<void> _refreshTransactions() async {
@@ -322,6 +330,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
     HapticFeedback.mediumImpact();
     final bytes = await DashboardScreen.generateBookPdfBytes(widget.bookId, widget.bookName);
     await Printing.sharePdf(bytes: bytes, filename: '${widget.bookName}_FinTrax_Statement.pdf');
+  }
+
+  Future<void> _confirmAndDeleteTransactionWithUndo(TransactionModel tx) async {
+    HapticFeedback.mediumImpact();
+    final displayTitle = FinTraxBrandHelper.resolveMerchantTitle(tx.name, tx.effectiveSmsText);
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Do you want to delete?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: Text(
+          'Delete "$displayTitle" from this book?',
+          style: const TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppConstants.expenseRed, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      HapticFeedback.heavyImpact();
+      final backupMap = tx.toMap();
+      await DatabaseHelper.instance.deleteTransaction(tx.id!, widget.bookId);
+      await _refreshTransactions();
+      if (!mounted) return;
+
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text('Deleted "$displayTitle"'),
+          action: SnackBarAction(
+            label: 'UNDO',
+            textColor: AppConstants.goldAccent,
+            onPressed: () async {
+              final db = await DatabaseHelper.instance.database;
+              await db.insert('transactions', backupMap);
+              FinTraxBrandHelper.dataRefreshNotifier.value++;
+            },
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _openCopyOrMoveBookSelector(TransactionModel tx, {required bool isMove}) async {
@@ -505,6 +564,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _showTransactionOptions(TransactionModel tx) {
     HapticFeedback.mediumImpact();
+    final displayTitle = FinTraxBrandHelper.resolveMerchantTitle(tx.name, tx.effectiveSmsText);
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
@@ -523,7 +584,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
                 child: Text(
-                  tx.name,
+                  displayTitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
@@ -564,11 +625,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: AppConstants.expenseRed),
                 title: const Text('Delete Entry', style: TextStyle(color: AppConstants.expenseRed)),
-                onTap: () async {
-                  HapticFeedback.heavyImpact();
-                  await DatabaseHelper.instance.deleteTransaction(tx.id!, widget.bookId);
-                  if (sheetContext.mounted) Navigator.pop(sheetContext);
-                  _refreshTransactions();
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _confirmAndDeleteTransactionWithUndo(tx);
                 },
               ),
             ],
@@ -690,6 +749,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       final bool hasSms = tx.effectiveSmsText.isNotEmpty;
                       final bool hasNote = tx.hasUserNote;
 
+                      final String displayTitle = FinTraxBrandHelper.resolveMerchantTitle(tx.name, tx.effectiveSmsText);
+                      final String effectiveCategory = FinTraxBrandHelper.detectCategory(
+                            displayTitle,
+                            smsBody: tx.effectiveSmsText,
+                            currentCategory: tx.category,
+                          ) ??
+                          tx.category;
+                      final bool isInvestment = effectiveCategory.toLowerCase() == 'investment';
+
                       final String displayPaymentMode = FinTraxBrandHelper.detectPaymentMethod(
                         currentMode: tx.paymentMode,
                         smsBody: tx.effectiveSmsText,
@@ -701,9 +769,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         sender: tx.name,
                       );
                       final String? merchantIconAsset = FinTraxBrandHelper.getMerchantIconAsset(
-                        tx.name,
+                        displayTitle,
                         smsBody: tx.effectiveSmsText,
                       );
+
+                      final Color borderColor = isInvestment
+                          ? AppConstants.incomeGreen.withOpacity(isDark ? 0.65 : 0.55)
+                          : (isDark ? AppConstants.borderDark : AppConstants.borderLight);
 
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
@@ -711,7 +783,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
-                            side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                            side: BorderSide(color: borderColor, width: isInvestment ? 1.35 : 1.0),
                           ),
                           clipBehavior: Clip.antiAlias,
                           child: InkWell(
@@ -752,7 +824,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                             ],
                                             Expanded(
                                               child: Text(
-                                                tx.name,
+                                                displayTitle,
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
@@ -772,9 +844,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       ),
                                     ],
                                   ),
-                                  if (tx.category.isNotEmpty) ...[
+                                  if (effectiveCategory.isNotEmpty) ...[
                                     const SizedBox(height: 4),
-                                    Text(tx.category, style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                                    Text(
+                                      isInvestment ? '📈 Investment' : effectiveCategory,
+                                      style: TextStyle(
+                                        color: isInvestment ? AppConstants.incomeGreen : Colors.grey[500],
+                                        fontWeight: isInvestment ? FontWeight.w700 : FontWeight.w500,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ],
                                   const SizedBox(height: 12),
                                   Row(
