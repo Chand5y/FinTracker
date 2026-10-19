@@ -45,24 +45,56 @@ jobs:
       - name: Generate Android configuration files
         run: flutter create --project-name fintrax --org com.chandsy .
 
-      - name: Ensure logo.png and assets/Icons/ are registered in pubspec.yaml
+      - name: Register logo.png and assets/Icons/ in pubspec.yaml
         run: |
           python3 - << 'EOF'
+          import os
+
           with open("pubspec.yaml", "r") as f:
-              content = f.read()
-          if "assets:" not in content and "uses-material-design: true" in content:
-              content = content.replace(
-                  "uses-material-design: true",
-                  "uses-material-design: true\n  assets:\n    - logo.png\n    - assets/Icons/",
-                  1,
-              )
-          else:
-              if "- logo.png" not in content:
-                  content = content.replace("assets:", "assets:\n    - logo.png", 1)
-              if "assets/Icons/" not in content:
-                  content = content.replace("assets:", "assets:\n    - assets/Icons/", 1)
+              lines = f.readlines()
+
+          asset_entries = ["    - logo.png\n"]
+          if os.path.isdir("assets/Icons"):
+              asset_entries.append("    - assets/Icons/\n")
+          if os.path.isdir("assets/icons"):
+              asset_entries.append("    - assets/icons/\n")
+
+          new_lines = []
+          in_assets = False
+          assets_handled = False
+
+          for line in lines:
+              if line.strip() == "assets:":
+                  in_assets = True
+                  assets_handled = True
+                  new_lines.append(line)
+                  for entry in asset_entries:
+                      new_lines.append(entry)
+                  continue
+              if in_assets:
+                  if line.strip().startswith("-"):
+                      if any(line.strip() == e.strip() for e in asset_entries):
+                          continue
+                  else:
+                      in_assets = False
+              new_lines.append(line)
+
+          if not assets_handled:
+              final_lines = []
+              for line in new_lines:
+                  final_lines.append(line)
+                  if "uses-material-design: true" in line:
+                      final_lines.append("  assets:\n")
+                      for entry in asset_entries:
+                          final_lines.append(entry)
+              new_lines = final_lines
+
           with open("pubspec.yaml", "w") as f:
-              f.write(content)
+              f.writelines(new_lines)
+
+          print("Updated pubspec.yaml assets section:")
+          with open("pubspec.yaml", "r") as f:
+              print(f.read())
           EOF
 
       - name: Configure Native Bridge & Disable R8 Stripping
@@ -135,7 +167,47 @@ jobs:
                   "Treat your wallet like a business—close the register before you go to bed.",
                   "Mystery expenses are only fun in movies. Log today's transactions while they're fresh!",
                   "One quick tap in FinTrax tonight = total peace of mind on the 1st of next month.",
-                  "Did someone borrow money from you today? Log it in your Lending book before you both forget!"
+                  "Did someone borrow money from you today? Log it in your Lending book before you both forget!",
+                  "I'm sure that purchase today was '100% necessary.' Let's put it in the book anyway!",
+                  "Ignoring an expense doesn't make it free. Trust me, I did the math.",
+                  "Your bank SMS inbox is working overtime. Come review and add today's transactions!",
+                  "Retail therapy is great, until the monthly summary arrives. Log today's shopping!",
+                  "Pretending you didn't spend money today is a bold strategy. Logging it is a smarter one.",
+                  "Was it a 'need' or a 'want'? FinTrax won't judge, it just wants the numbers.",
+                  "You remembered to charge your phone. Now take 20 seconds to update your expense book!",
+                  "Unless you lived on air and sunshine today, there's probably an expense waiting to be logged.",
+                  "That 'Add to Cart' finger was quick today. Let's see that same speed in FinTrax!",
+                  "Spoiler alert: 'I'll remember this expense tomorrow' is the biggest lie we tell ourselves.",
+                  "Your wallet isn't leaking; it's just waiting for you to track the tiny drips.",
+                  "Another day, another QR code scanned at lightning speed. Time for your evening recap!",
+                  "No matter how fast you close the payment app, the money still left. Let's log it!",
+                  "Your future billionaire self is waiting for you to build the habit of tracking ₹50 expenses.",
+                  "Online sales are temporary; financial clarity is permanent. Log what you bought today!",
+                  "Cash spent still counts as real money—don't let cash expenses sneak past your book!",
+                  "Let's play a quick game called 'Name 3 things you spent money on today.' Go!",
+                  "If your money had a GPS, where did it travel today? Drop a pin in FinTrax.",
+                  "Your budget isn't mad, it just wants to be kept in the loop. Log today's entries!",
+                  "Skipping expense tracking is like driving with your eyes closed. Take a quick peek tonight!",
+                  "Financial freedom starts with knowing your numbers. Take a moment to log today's expenses.",
+                  "Small daily habits build big financial confidence. Ready to log today's transactions?",
+                  "You don't need to earn more to feel in control—just knowing where your money goes changes everything.",
+                  "Every entry you log is a step toward smarter money decisions. Keep the streak going!",
+                  "Great money managers aren't born; they just check in with their expenses for 1 minute a night.",
+                  "Awareness is the best financial advisor. Open FinTrax and wrap up your day's numbers!",
+                  "Whether today was a high-spend day or a zero-spend day, tracking it keeps you in the driver's seat.",
+                  "Knowing your daily numbers turns financial stress into financial strategy. Let's log today!",
+                  "A clear mind and a balanced book make for the best night's sleep. Log your day!",
+                  "You're building a clearer picture of your finances one day at a time. Add today's entries!",
+                  "Smart spending starts with honest tracking. Take 30 seconds to update your books tonight.",
+                  "Look after your rupees in FinTrax tonight, and they'll look after you tomorrow.",
+                  "Consistency beats perfection. Even logging one or two expenses tonight keeps you ahead!",
+                  "Your monthly insights are built one evening at a time. Add today's piece of the puzzle!",
+                  "Tracking expenses isn't about restricting yourself—it's about spending on what truly matters.",
+                  "Take pride in staying on top of your finances. Let's log today's transactions!",
+                  "Evening financial check-in: 60 seconds now for 100% clarity on your money.",
+                  "Most people have no idea where 30% of their income goes. You're not 'most people'—log today's spend!",
+                  "End the day with clarity. Review your bank SMS or add today's cash expenses in FinTrax.",
+                  "You've got big goals ahead. Keeping track of today's expenses helps you reach them faster!"
               )
 
               private val monthNames = arrayOf(
