@@ -12,7 +12,7 @@ import '../data/transaction_model.dart';
 class FinTraxBrandHelper {
   static const List<Map<String, String>> paymentMethods = [
     {'name': 'Cash', 'emoji': '💵', 'asset': ''},
-    {'name': 'UPI', 'emoji': '📱', 'asset': ''},
+    {'name': 'UPI', 'emoji': '📱', 'asset': 'assets/Icons/upi.png'},
     {'name': 'Airtel', 'emoji': '🏦', 'asset': 'assets/Icons/airtel.png'},
     {'name': 'Utkarsh SFBL', 'emoji': '💳', 'asset': 'assets/Icons/Utkarsh.png'},
     {'name': 'Kotak Bank', 'emoji': '🏦', 'asset': 'assets/Icons/kotak.png'},
@@ -30,7 +30,7 @@ class FinTraxBrandHelper {
     {'name': 'JioPay', 'emoji': '📱', 'asset': 'assets/Icons/jio.png'},
     {'name': 'Card', 'emoji': '💳', 'asset': ''},
     {'name': 'Bank Transfer', 'emoji': '🏦', 'asset': ''},
-    {'name': 'Online', 'emoji': '🌐', 'asset': ''},
+    {'name': 'Online', 'emoji': '🌐', 'asset': 'assets/Icons/upi.png'},
   ];
 
   static String detectPaymentMethod({
@@ -85,6 +85,9 @@ class FinTraxBrandHelper {
     if (combined.contains('jiopay')) {
       return 'JioPay';
     }
+    if (combined.contains('upi')) {
+      return 'UPI';
+    }
 
     if (currentMode.trim().isNotEmpty) {
       return currentMode.trim();
@@ -129,7 +132,6 @@ class FinTraxBrandHelper {
     if (currentCategory.trim().isNotEmpty) return currentCategory.trim();
     final text = '$name $smsBody'.toLowerCase();
 
-    // Check Swiggy Instamart & E-commerce first so Instamart maps to Shopping
     if (text.contains('instamart') ||
         text.contains('flipkart') ||
         text.contains('amazon') ||
@@ -141,7 +143,6 @@ class FinTraxBrandHelper {
       return 'Shopping';
     }
 
-    // Food delivery & dining apps
     if (text.contains('zomato') ||
         text.contains('swiggy') ||
         text.contains('dominos') ||
@@ -156,6 +157,19 @@ class FinTraxBrandHelper {
     return null;
   }
 
+  static List<String> parseImagePaths(String rawImagePath) {
+    if (rawImagePath.trim().isEmpty) return [];
+    return rawImagePath
+        .split('|')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  static String joinImagePaths(List<String> paths) {
+    return paths.map((s) => s.trim()).where((s) => s.isNotEmpty).join('|');
+  }
+
   static Widget buildIconBadge({
     required String? assetPath,
     required String fallbackEmoji,
@@ -163,6 +177,9 @@ class FinTraxBrandHelper {
     double borderRadius = 6,
   }) {
     if (assetPath != null && assetPath.isNotEmpty) {
+      final String altCasePath = assetPath.contains('/upi.png')
+          ? assetPath.replaceAll('/upi.png', '/UPI.png')
+          : assetPath;
       return ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
         child: Image.asset(
@@ -170,7 +187,18 @@ class FinTraxBrandHelper {
           width: size,
           height: size,
           fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78)),
+          errorBuilder: (_, __, ___) {
+            if (altCasePath != assetPath) {
+              return Image.asset(
+                altCasePath,
+                width: size,
+                height: size,
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78)),
+              );
+            }
+            return Text(fallbackEmoji, style: TextStyle(fontSize: size * 0.78));
+          },
         ),
       );
     }
@@ -207,7 +235,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   String? _selectedCategory;
   late String _paymentMode;
   late DateTime _selectedDate;
-  String _imagePath = '';
+  List<String> _imagePaths = [];
   String _smsText = '';
 
   late TextEditingController _amountController;
@@ -262,7 +290,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       sender: _nameController.text,
     );
 
-    _imagePath = widget.existingTransaction?.imagePath ?? '';
+    _imagePaths = FinTraxBrandHelper.parseImagePaths(widget.existingTransaction?.imagePath ?? '');
     _nameController.addListener(_onMerchantNameChanged);
     _loadOtherBooks();
   }
@@ -741,32 +769,63 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickImages() async {
     HapticFeedback.selectionClick();
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
-    if (image != null) {
-      setState(() => _imagePath = image.path);
+    try {
+      final List<XFile> pickedList = await _picker.pickMultiImage(imageQuality: 80);
+      if (pickedList.isNotEmpty && mounted) {
+        setState(() {
+          for (final item in pickedList) {
+            if (!_imagePaths.contains(item.path)) {
+              _imagePaths.add(item.path);
+            }
+          }
+        });
+        return;
+      }
+    } catch (_) {
+      final XFile? single = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      if (single != null && mounted) {
+        setState(() {
+          if (!_imagePaths.contains(single.path)) {
+            _imagePaths.add(single.path);
+          }
+        });
+      }
     }
   }
 
-  void _openImageFullScreen() {
+  void _openImageGalleryFullScreen(int initialIndex) {
     HapticFeedback.lightImpact();
+    final pageCtrl = PageController(initialPage: initialIndex);
+    int currentIdx = initialIndex;
+
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
+        builder: (_) => StatefulBuilder(
+          builder: (ctx, setGalleryState) => Scaffold(
             backgroundColor: Colors.black,
-            iconTheme: const IconThemeData(color: Colors.white),
-            title: const Text('Receipt Attachment', style: TextStyle(color: Colors.white, fontSize: 16)),
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              panEnabled: true,
-              minScale: 0.5,
-              maxScale: 4.0,
-              child: Image.file(File(_imagePath)),
+            appBar: AppBar(
+              backgroundColor: Colors.black,
+              iconTheme: const IconThemeData(color: Colors.white),
+              title: Text(
+                'Attachment ${currentIdx + 1} of ${_imagePaths.length}',
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+              ),
+            ),
+            body: PageView.builder(
+              controller: pageCtrl,
+              itemCount: _imagePaths.length,
+              onPageChanged: (i) => setGalleryState(() => currentIdx = i),
+              itemBuilder: (_, idx) => Center(
+                child: InteractiveViewer(
+                  panEnabled: true,
+                  minScale: 0.5,
+                  maxScale: 4.0,
+                  child: Image.file(File(_imagePaths[idx])),
+                ),
+              ),
             ),
           ),
         ),
@@ -798,7 +857,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       date: _selectedDate,
       currency: AppConstants.defaultCurrency,
       paymentMode: _paymentMode,
-      imagePath: _imagePath,
+      imagePath: FinTraxBrandHelper.joinImagePaths(_imagePaths),
     );
 
     if (isNewInsert) {
@@ -1079,7 +1138,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               controller: _nameController,
               textCapitalization: TextCapitalization.sentences,
               decoration: InputDecoration(
-                labelText: 'Remark / Title (e.g., Flipkart, Zomato, Bill)',
+                labelText: 'Remark / Title (e.g., Milk, Shoe, etc.)',
                 filled: true,
                 fillColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -1141,7 +1200,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               ),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
-                onTap: _pickImage,
+                onTap: _pickImages,
                 borderRadius: BorderRadius.circular(14),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
@@ -1151,59 +1210,78 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          _imagePath.isEmpty ? 'Attach Receipt or Screenshot' : 'Change Attached Image',
+                          _imagePaths.isEmpty
+                              ? 'Attach Receipt or Screenshot(s)'
+                              : 'Add More Images (${_imagePaths.length} attached)',
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                       ),
+                      Icon(Icons.add_circle_outline_rounded, size: 18, color: Theme.of(context).colorScheme.primary),
                     ],
                   ),
                 ),
               ),
             ),
-            if (_imagePath.isNotEmpty) ...[
+            if (_imagePaths.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF181A20) : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isDark ? const Color(0xFF323642) : const Color(0xFFCBD5E1),
-                    width: 1.5,
-                  ),
-                ),
-                child: Stack(
-                  alignment: Alignment.topRight,
-                  children: [
-                    GestureDetector(
-                      onTap: _openImageFullScreen,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.file(
-                          File(_imagePath),
-                          height: 170,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
+              SizedBox(
+                height: 130,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _imagePaths.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  itemBuilder: (ctx, idx) {
+                    final path = _imagePaths[idx];
+                    return Container(
+                      width: 130,
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF181A20) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF323642) : const Color(0xFFCBD5E1),
+                          width: 1.2,
                         ),
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: CircleAvatar(
-                        radius: 16,
-                        backgroundColor: Colors.black54,
-                        child: IconButton(
-                          padding: EdgeInsets.zero,
-                          icon: const Icon(Icons.close, size: 18, color: Colors.white),
-                          onPressed: () => setState(() => _imagePath = ''),
-                        ),
+                      child: Stack(
+                        alignment: Alignment.topRight,
+                        children: [
+                          GestureDetector(
+                            onTap: () => _openImageGalleryFullScreen(idx),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Image.file(
+                                File(path),
+                                width: double.infinity,
+                                height: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.all(4.0),
+                            child: CircleAvatar(
+                              radius: 13,
+                              backgroundColor: Colors.black54,
+                              child: IconButton(
+                                padding: EdgeInsets.zero,
+                                icon: const Icon(Icons.close, size: 15, color: Colors.white),
+                                onPressed: () => setState(() => _imagePaths.removeAt(idx)),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(height: 6),
-              Text('Tap image to view full screen', style: TextStyle(fontSize: 11, color: Colors.grey[500]), textAlign: TextAlign.center),
+              Text(
+                'Tap any image to view full screen • Tap + above to attach more',
+                style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                textAlign: TextAlign.center,
+              ),
             ],
             const SizedBox(height: 26),
             FilledButton(
