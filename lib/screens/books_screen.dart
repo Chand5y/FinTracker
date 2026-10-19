@@ -520,15 +520,20 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 20),
-                                    const SizedBox(width: 10),
+                                    const Icon(Icons.verified_user_rounded, color: AppConstants.incomeGreen, size: 19),
+                                    const SizedBox(width: 9),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          const Text(
-                                            '100% Offline • Zero Data Collection • Zero Ads',
-                                            style: TextStyle(fontSize: 12.2, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                                          const FittedBox(
+                                            fit: BoxFit.scaleDown,
+                                            alignment: Alignment.centerLeft,
+                                            child: Text(
+                                              '100% Offline • Zero Data Collection • Zero Ads',
+                                              maxLines: 1,
+                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                                            ),
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
@@ -583,7 +588,7 @@ class _WelcomeSetupScreenState extends State<WelcomeSetupScreen> with WidgetsBin
                                     isDark,
                                     Icons.insights_rounded,
                                     '1st-of-the-Month Recap',
-                                    'Wake up on the 1st to a ready-made summary of last month\'s shopping, groceries, and savings.',
+                                    'Wake up on the 1st to a ready-made summary of last month\'s shopping, groceries, investments, and savings.',
                                   ),
                                   _featureTile(
                                     isDark,
@@ -744,11 +749,13 @@ class _BooksScreenState extends State<BooksScreen> {
   void initState() {
     super.initState();
     AppLogger.instance.log('BooksScreen.initState() called.', tag: 'LIFECYCLE');
+    FinTraxBrandHelper.dataRefreshNotifier.addListener(_loadBooks);
     _startupSequence();
   }
 
   @override
   void dispose() {
+    FinTraxBrandHelper.dataRefreshNotifier.removeListener(_loadBooks);
     _autoBackupTimer?.cancel();
     _tabPageController.dispose();
     _bookSearchController.dispose();
@@ -991,7 +998,7 @@ class _BooksScreenState extends State<BooksScreen> {
       {'label': 'Money Lent', 'type': 'lending', 'icon': '🤝'},
       {'label': 'Home & Bills', 'type': 'standard', 'icon': '🏠'},
       {'label': 'Travel & Trips', 'type': 'standard', 'icon': '✈️'},
-      {'label': 'Family & Medical', 'type': 'standard', 'icon': '🏥'},
+      {'label': 'Investments', 'type': 'standard', 'icon': '📈'},
     ];
 
     Widget buildCompactSuggestionChip({
@@ -1328,8 +1335,65 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  Future<void> _confirmAndDeleteBookWithUndo(int bookId, String bookName) async {
+    HapticFeedback.mediumImpact();
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Do you want to delete?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+        content: Text(
+          'Delete "$bookName" and all its entries?',
+          style: const TextStyle(fontSize: 13.5, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppConstants.expenseRed, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      HapticFeedback.heavyImpact();
+      final db = await DatabaseHelper.instance.database;
+      final bookRows = await db.query('books', where: 'id = ?', whereArgs: [bookId]);
+      final txRows = await db.query('transactions', where: 'bookId = ?', whereArgs: [bookId]);
+
+      await DatabaseHelper.instance.deleteBook(bookId);
+      await _loadBooks();
+      if (!mounted) return;
+
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.clearSnackBars();
+      messenger.showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: Text('Deleted "$bookName"'),
+          action: SnackBarAction(
+            label: 'UNDO',
+            textColor: AppConstants.goldAccent,
+            onPressed: () async {
+              final restoreDb = await DatabaseHelper.instance.database;
+              if (bookRows.isNotEmpty) {
+                await restoreDb.insert('books', Map<String, Object?>.from(bookRows.first));
+              }
+              for (final tx in txRows) {
+                await restoreDb.insert('transactions', Map<String, Object?>.from(tx));
+              }
+              await _loadBooks();
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   // ===========================================================================
-  // MONTHLY FINANCIAL INSIGHTS MODAL (1ST OF MONTH & ANYTIME VIEW)
+  // MONTHLY FINANCIAL INSIGHTS MODAL (WITH INVESTMENT HIGHLIGHT)
   // ===========================================================================
   void _openMonthlyInsightsSheet({bool initialPreviousMonth = true}) {
     HapticFeedback.lightImpact();
@@ -1454,6 +1518,16 @@ class _BooksScreenState extends State<BooksScreen> {
                         final List<dynamic> cats = (data['categoryBreakdown'] as List<dynamic>?) ?? [];
                         final List<dynamic> booksBreak = (data['bookBreakdown'] as List<dynamic>?) ?? [];
 
+                        double investmentSpend = (data['investmentSpend'] as num?)?.toDouble() ?? 0.0;
+                        if (investmentSpend == 0.0) {
+                          for (final c in cats) {
+                            final String cName = c['name']?.toString().toLowerCase() ?? '';
+                            if (cName == 'investment' || cName == 'investments') {
+                              investmentSpend += (c['amount'] as num?)?.toDouble() ?? 0.0;
+                            }
+                          }
+                        }
+
                         if (txCount == 0 && lendingGiven == 0) {
                           return Padding(
                             padding: const EdgeInsets.all(36),
@@ -1532,7 +1606,7 @@ class _BooksScreenState extends State<BooksScreen> {
                             ),
                             const SizedBox(height: 16),
                             Text(
-                              'KEY SPENDING HIGHLIGHTS',
+                              'KEY SPENDING & INVESTMENT HIGHLIGHTS',
                               style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, letterSpacing: 1.1, color: Colors.grey[500]),
                             ),
                             const SizedBox(height: 8),
@@ -1541,12 +1615,26 @@ class _BooksScreenState extends State<BooksScreen> {
                                 Expanded(
                                   child: _highlightPill(
                                     isDark: isDark,
+                                    emoji: '📈',
+                                    label: 'Investment',
+                                    amount: investmentSpend,
+                                    highlightGreen: true,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: _highlightPill(
+                                    isDark: isDark,
                                     emoji: '🛍️',
                                     label: 'Shopping',
                                     amount: shoppingSpend,
                                   ),
                                 ),
-                                const SizedBox(width: 8),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
                                 Expanded(
                                   child: _highlightPill(
                                     isDark: isDark,
@@ -1575,6 +1663,7 @@ class _BooksScreenState extends State<BooksScreen> {
                               const SizedBox(height: 8),
                               ...cats.take(6).map((c) {
                                 final String cName = c['name'].toString();
+                                final bool isInv = cName.toLowerCase() == 'investment';
                                 final double cAmt = (c['amount'] as num).toDouble();
                                 final double pct = totalOut > 0 ? (cAmt / totalOut).clamp(0.0, 1.0) : 0.0;
                                 return Padding(
@@ -1585,10 +1674,21 @@ class _BooksScreenState extends State<BooksScreen> {
                                       Row(
                                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                         children: [
-                                          Text(cName, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                          Text(
+                                            isInv ? '📈 $cName' : cName,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w700,
+                                              color: isInv ? AppConstants.incomeGreen : null,
+                                            ),
+                                          ),
                                           Text(
                                             '${AppConstants.defaultCurrency}${cAmt.toStringAsFixed(0)} (${(pct * 100).toStringAsFixed(0)}%)',
-                                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                                            style: TextStyle(
+                                              fontSize: 12.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: isInv ? AppConstants.incomeGreen : null,
+                                            ),
                                           ),
                                         ],
                                       ),
@@ -1599,7 +1699,9 @@ class _BooksScreenState extends State<BooksScreen> {
                                           value: pct,
                                           minHeight: 6,
                                           backgroundColor: isDark ? Colors.white10 : Colors.black12,
-                                          valueColor: AlwaysStoppedAnimation<Color>(scheme.primary),
+                                          valueColor: AlwaysStoppedAnimation<Color>(
+                                            isInv ? AppConstants.incomeGreen : scheme.primary,
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -1685,23 +1787,51 @@ class _BooksScreenState extends State<BooksScreen> {
     required String emoji,
     required String label,
     required double amount,
+    bool highlightGreen = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF171A24) : const Color(0xFFF8FAFC),
+        color: highlightGreen
+            ? AppConstants.incomeGreen.withOpacity(isDark ? 0.14 : 0.08)
+            : (isDark ? const Color(0xFF171A24) : const Color(0xFFF8FAFC)),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+        border: Border.all(
+          color: highlightGreen
+              ? AppConstants.incomeGreen.withOpacity(0.55)
+              : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
+          width: highlightGreen ? 1.3 : 1.0,
+        ),
       ),
-      child: Column(
+      child: Row(
         children: [
           Text(emoji, style: const TextStyle(fontSize: 18)),
-          const SizedBox(height: 4),
-          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: Colors.grey[500], fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(
-            '${AppConstants.defaultCurrency}${amount.toStringAsFixed(0)}',
-            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: highlightGreen ? AppConstants.incomeGreen : Colors.grey[500],
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${AppConstants.defaultCurrency}${amount.toStringAsFixed(0)}',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: highlightGreen ? AppConstants.incomeGreen : null,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1785,11 +1915,9 @@ class _BooksScreenState extends State<BooksScreen> {
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: AppConstants.expenseRed),
                 title: const Text('Delete Book', style: TextStyle(color: AppConstants.expenseRed)),
-                onTap: () async {
-                  HapticFeedback.heavyImpact();
-                  await DatabaseHelper.instance.deleteBook(bookId);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  _loadBooks();
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmAndDeleteBookWithUndo(bookId, bookName);
                 },
               ),
             ],
@@ -1900,6 +2028,7 @@ class _BooksScreenState extends State<BooksScreen> {
                         final item = _pendingSms[i];
                         final isCredit = item.type == 'Income';
 
+                        final String resolvedTitle = FinTraxBrandHelper.resolveMerchantTitle(item.merchant, item.body);
                         final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
                           currentMode: item.paymentMode,
                           smsBody: item.body,
@@ -1910,12 +2039,8 @@ class _BooksScreenState extends State<BooksScreen> {
                           smsBody: item.body,
                           sender: item.merchant,
                         );
-                        final String? merchantIconAsset = FinTraxBrandHelper.getMerchantIconAsset(
-                          item.merchant,
-                          smsBody: item.body,
-                        );
                         final String? autoCat = FinTraxBrandHelper.detectCategory(
-                          item.merchant,
+                          resolvedTitle,
                           smsBody: item.body,
                         );
 
@@ -1925,29 +2050,10 @@ class _BooksScreenState extends State<BooksScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Expanded(
-                                child: Row(
-                                  children: [
-                                    if (merchantIconAsset != null) ...[
-                                      ClipRRect(
-                                        borderRadius: BorderRadius.circular(5),
-                                        child: Image.asset(
-                                          merchantIconAsset,
-                                          width: 18,
-                                          height: 18,
-                                          fit: BoxFit.contain,
-                                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 7),
-                                    ],
-                                    Expanded(
-                                      child: Text(
-                                        item.merchant,
-                                        style: const TextStyle(fontWeight: FontWeight.w700),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  ],
+                                child: Text(
+                                  resolvedTitle,
+                                  style: const TextStyle(fontWeight: FontWeight.w700),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -2120,13 +2226,14 @@ class _BooksScreenState extends State<BooksScreen> {
 
     if (targetBookId != null && targetBookId > 0 && mounted) {
       HapticFeedback.lightImpact();
+      final String resolvedTitle = FinTraxBrandHelper.resolveMerchantTitle(sms.merchant, sms.body);
       final String resolvedMode = FinTraxBrandHelper.detectPaymentMethod(
         currentMode: sms.paymentMode,
         smsBody: sms.body,
         sender: sms.merchant,
       );
       final String autoCategory = FinTraxBrandHelper.detectCategory(
-            sms.merchant,
+            resolvedTitle,
             smsBody: sms.body,
           ) ??
           '';
@@ -2136,7 +2243,7 @@ class _BooksScreenState extends State<BooksScreen> {
         bookId: targetBookId,
         type: sms.type,
         amount: sms.amount,
-        name: sms.merchant,
+        name: resolvedTitle,
         category: autoCategory,
         notes: '',
         smsBody: sms.body,
@@ -2765,7 +2872,7 @@ class _BooksScreenState extends State<BooksScreen> {
                                       bookType,
                                     ),
                                     child: Padding(
-                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                                       child: Row(
                                         children: [
                                           Container(
@@ -2818,8 +2925,8 @@ class _BooksScreenState extends State<BooksScreen> {
                                                     ),
                                                   ],
                                                 ),
-                                                const SizedBox(height: 5),
-                                                // Line 2: Updated Date & Time (and Created pill for standard books)
+                                                const SizedBox(height: 6),
+                                                // Line 2: Clean 2-Line Metadata (Updated Time + Created Date Pill)
                                                 Row(
                                                   children: [
                                                     Icon(Icons.schedule_rounded, size: 11.5, color: Colors.grey[500]),
@@ -2836,69 +2943,25 @@ class _BooksScreenState extends State<BooksScreen> {
                                                         ),
                                                       ),
                                                     ),
-                                                    if (!isLending) ...[
-                                                      const SizedBox(width: 6),
-                                                      Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                        decoration: BoxDecoration(
-                                                          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
-                                                          borderRadius: BorderRadius.circular(5),
-                                                        ),
-                                                        child: Text(
-                                                          'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
-                                                          style: TextStyle(
-                                                            fontSize: 8.5,
-                                                            letterSpacing: -0.2,
-                                                            fontWeight: FontWeight.w500,
-                                                            color: isDark ? Colors.grey[400] : Colors.grey[600],
-                                                          ),
+                                                    const SizedBox(width: 6),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                      decoration: BoxDecoration(
+                                                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
+                                                        borderRadius: BorderRadius.circular(5),
+                                                      ),
+                                                      child: Text(
+                                                        'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
+                                                        style: TextStyle(
+                                                          fontSize: 8.5,
+                                                          letterSpacing: -0.2,
+                                                          fontWeight: FontWeight.w500,
+                                                          color: isDark ? Colors.grey[400] : Colors.grey[600],
                                                         ),
                                                       ),
-                                                    ],
+                                                    ),
                                                   ],
                                                 ),
-                                                // Line 3 (Only for Lending books): Lending Badge + Created Date Pill
-                                                if (isLending) ...[
-                                                  const SizedBox(height: 5),
-                                                  Row(
-                                                    children: [
-                                                      Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                        decoration: BoxDecoration(
-                                                          color: AppConstants.goldAccent.withOpacity(0.18),
-                                                          borderRadius: BorderRadius.circular(5),
-                                                          border: Border.all(color: AppConstants.goldAccent.withOpacity(0.5), width: 0.6),
-                                                        ),
-                                                        child: const Text(
-                                                          'LENDING',
-                                                          style: TextStyle(
-                                                            fontSize: 8,
-                                                            fontWeight: FontWeight.w800,
-                                                            color: AppConstants.goldAccent,
-                                                            letterSpacing: 0.5,
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      const Spacer(),
-                                                      Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                        decoration: BoxDecoration(
-                                                          color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04),
-                                                          borderRadius: BorderRadius.circular(5),
-                                                        ),
-                                                        child: Text(
-                                                          'Created: ${AppConstants.formatOrdinalDate(createdDate)}',
-                                                          style: TextStyle(
-                                                            fontSize: 8.5,
-                                                            letterSpacing: -0.2,
-                                                            fontWeight: FontWeight.w500,
-                                                            color: isDark ? Colors.grey[400] : Colors.grey[600],
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ],
                                               ],
                                             ),
                                           ),
@@ -3203,14 +3266,19 @@ class _BooksScreenState extends State<BooksScreen> {
                   padding: EdgeInsets.only(top: 2),
                   child: Icon(Icons.verified_user_outlined, color: AppConstants.incomeGreen, size: 19),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        '100% Offline • Zero Data Collection • Zero Ads',
-                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                      const FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '100% Offline • Zero Data Collection • Zero Ads',
+                          maxLines: 1,
+                          style: TextStyle(fontSize: 12.2, fontWeight: FontWeight.w800, color: AppConstants.incomeGreen),
+                        ),
                       ),
                       const SizedBox(height: 3),
                       Text(
@@ -3257,6 +3325,18 @@ class _BooksScreenState extends State<BooksScreen> {
               onTap: () {
                 HapticFeedback.lightImpact();
                 _nativeBridge.invokeMethod('openUrl', {'url': 'mailto:${AppConstants.defaultDeveloperEmail}?subject=FinTrax%20Feedback'});
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.send_rounded, color: scheme.primary, size: 20),
+              title: const Text('Telegram', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+              subtitle: const Text('@chandsy', style: TextStyle(fontSize: 11.5)),
+              trailing: const Icon(Icons.open_in_new_rounded, size: 16, color: Colors.grey),
+              onTap: () {
+                HapticFeedback.lightImpact();
+                _nativeBridge.invokeMethod('openUrl', {'url': 'https://t.me/chandsy'});
               },
             ),
             const Divider(height: 1),
