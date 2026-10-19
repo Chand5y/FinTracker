@@ -37,10 +37,6 @@ Unlike cloud-heavy financial apps, FinTrax runs **100% entirely on-device**. It 
 
 ## 📸 Screenshots
 
-*(Upload 3-4 of your best screenshots into the repository and link them here!)*
-<!-- Example: <img src="assets/screenshot1.jpg" width="250"> -->
-
----
 
 ## 👨‍💻 About the Developer & 🚀 Open to Work
 
