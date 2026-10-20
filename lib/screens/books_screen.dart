@@ -2493,13 +2493,23 @@ class _BooksScreenState extends State<BooksScreen> {
 
     try {
       if (switchAccount) {
-        await _googleAuth.signOut();
+        try {
+          await _googleAuth.signOut();
+        } catch (signOutErr) {
+          AppLogger.instance.log('Ignored signOut notice on fresh device: $signOutErr', tag: 'WARN');
+        }
       }
       GoogleSignInAccount? user = _googleAuth.currentUser;
       if (user == null && !switchAccount) {
-        user = await _googleAuth.signInSilently();
+        try {
+          user = await _googleAuth.signInSilently();
+        } catch (silentErr) {
+          AppLogger.instance.log('signInSilently skipped, opening picker: $silentErr', tag: 'WARN');
+          user = null;
+        }
       }
       user ??= await _googleAuth.signIn();
+
 
       if (user == null) {
         AppLogger.instance.log('User cancelled account picker.', tag: 'WARN');
