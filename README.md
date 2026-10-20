@@ -36,6 +36,24 @@ Unlike cloud-heavy financial apps, FinTrax runs **100% entirely on-device**. It 
 *   **CI/CD:** Automated APK builds, artifact generation, and cryptographic signing using GitHub Actions.
 
 ## 📸 Screenshots
+<p align="center">
+  <img src="Screenshots/SetupScreen.jpg" width="23%" alt="Setup Screen" />
+  <img src="Screenshots/books.jpg" width="23%" alt="Books Overview" />
+  <img src="Screenshots/ledger.jpg" width="23%" alt="Ledger" />
+  <img src="Screenshots/EditEntry.jpg" width="23%" alt="Edit Entry" />
+</p>
+
+<p align="center">
+  <img src="Screenshots/SMS_entry.jpg" width="23%" alt="SMS Detection" />
+  <img src="Screenshots/insight.jpg" width="23%" alt="Monthly Insights" />
+  <img src="Screenshots/GDriveBackup.jpg" width="23%" alt="Google Drive Backup" />
+  <img src="Screenshots/NewBook.jpg" width="23%" alt="New Book" />
+</p>
+
+<p align="center">
+  <img src="Screenshots/ExportedFile.png" width="35%" alt="Exported Report" />
+</p>
+
 
 
 ## 👨‍💻 About the Developer & 🚀 Open to Work
