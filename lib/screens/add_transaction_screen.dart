@@ -12,6 +12,8 @@ import '../data/transaction_model.dart';
 class FinTraxBrandHelper {
   static final ValueNotifier<int> dataRefreshNotifier = ValueNotifier<int>(0);
 
+  static const String vicesCategoryName = 'Vices & Addictions';
+
   static const List<Map<String, String>> paymentMethods = [
     {'name': 'Cash', 'emoji': '💵', 'asset': ''},
     {'name': 'UPI', 'emoji': '📱', 'asset': 'assets/icons/upi.png'},
@@ -34,6 +36,37 @@ class FinTraxBrandHelper {
     {'name': 'Bank Transfer', 'emoji': '🏦', 'asset': ''},
     {'name': 'Online', 'emoji': '🌐', 'asset': 'assets/icons/upi.png'},
   ];
+
+  static List<Map<String, String>> get allCategories {
+    final base = List<Map<String, String>>.from(AppConstants.categories)
+        .where((c) => (c['name'] ?? '').toLowerCase() != 'food')
+        .toList();
+
+    final result = <Map<String, String>>[
+      {'name': vicesCategoryName, 'emoji': '🚭'},
+      ...base,
+    ];
+
+    if (!result.any((c) => (c['name'] ?? '').toLowerCase() == 'investment')) {
+      result.add({'name': 'Investment', 'emoji': '📈'});
+    }
+    if (!result.any((c) => (c['name'] ?? '').toLowerCase() == 'emi')) {
+      result.add({'name': 'EMI', 'emoji': '🏦'});
+    }
+    return result;
+  }
+
+  static String getCategoryEmoji(String? catName) {
+    if (catName == null || catName.trim().isEmpty) return '🏷️';
+    final lower = catName.trim().toLowerCase();
+    if (lower == 'food') return '🍔';
+    for (final c in allCategories) {
+      if ((c['name'] ?? '').toLowerCase() == lower) {
+        return c['emoji'] ?? '🏷️';
+      }
+    }
+    return '🏷️';
+  }
 
   /// Replaces raw SMS sender headers (like JK-UTKSPR-S or UTKSPR-S) with the actual
   /// merchant name found inside the SMS body (e.g., Flipkart).
@@ -58,7 +91,6 @@ class FinTraxBrandHelper {
       return trimmed;
     }
 
-    // 1. Check for known merchants/brands inside the SMS body
     if (lowerSms.contains('flipkart')) return 'Flipkart';
     if (lowerSms.contains('instamart')) return 'Swiggy Instamart';
     if (lowerSms.contains('swiggy')) return 'Swiggy';
@@ -76,7 +108,6 @@ class FinTraxBrandHelper {
     if (lowerSms.contains('kuvera')) return 'Kuvera';
     if (lowerSms.contains('jio')) return 'Jio';
 
-    // 2. Extract merchant from "spent on your SuperCard at <MERCHANT>." or "at <MERCHANT>"
     final atMatch = RegExp(
       r'(?:supercard\s+at|spent\s+at|paid\s+to|sent\s+to|trf\s+to)\s+([A-Za-z0-9][A-Za-z0-9 &._-]{1,30}?)(?:\s+internet\s+priva|\s+pvt|\s+private|\s+on\b|\s+available\b|\.|\s*$)',
       caseSensitive: false,
@@ -185,7 +216,17 @@ class FinTraxBrandHelper {
     return AppConstants.paymentModeEmojis[paymentMode] ?? '💳';
   }
 
+  /// Returns the brand/app icon (Flipkart, Amazon, Zomato, Swiggy, Myntra, Meesho, Jio)
+  /// to display alongside the bank icon or inside the category badge.
   static String? getMerchantIconAsset(String name, {String smsBody = ''}) {
+    final text = '$name $smsBody'.toLowerCase();
+    if (text.contains('flipkart')) return 'assets/icons/Flipkart.png';
+    if (text.contains('amazon') || text.contains('amzn')) return 'assets/icons/amazon.png';
+    if (text.contains('myntra')) return 'assets/icons/Myntra.png';
+    if (text.contains('meesho')) return 'assets/icons/meesho.png';
+    if (text.contains('swiggy') || text.contains('instamart')) return 'assets/icons/swiggy.png';
+    if (text.contains('zomato') || text.contains('blinkit')) return 'assets/icons/zomato.png';
+    if (text.contains('jio')) return 'assets/icons/jio.png';
     return null;
   }
 
@@ -242,9 +283,11 @@ class FinTraxBrandHelper {
     return map;
   }
 
-
   static String? detectCategory(String name, {String smsBody = '', String currentCategory = ''}) {
-    if (currentCategory.trim().isNotEmpty) return currentCategory.trim();
+    if (currentCategory.trim().isNotEmpty) {
+      if (currentCategory.trim().toLowerCase() == 'food') return 'Food & Dining';
+      return currentCategory.trim();
+    }
     final text = '$name $smsBody'.toLowerCase();
 
     // 1. Investment: SIP, Mutual Funds, Stock purchases, Brokers
@@ -273,7 +316,25 @@ class FinTraxBrandHelper {
       return 'Investment';
     }
 
-    // 2. Shopping / E-commerce
+    // 2. Vices & Addictions (Smoking, Alcohol, Betting, etc.)
+    if (text.contains('cigarette') ||
+        text.contains('smoke') ||
+        text.contains('tobacco') ||
+        text.contains('vape') ||
+        text.contains('hookah') ||
+        text.contains('alcohol') ||
+        text.contains('liquor') ||
+        text.contains('wine shop') ||
+        text.contains('beer') ||
+        text.contains('whisky') ||
+        text.contains('vodka') ||
+        text.contains('casino') ||
+        text.contains('dream11') ||
+        text.contains('betting')) {
+      return vicesCategoryName;
+    }
+
+    // 3. Shopping / E-commerce
     if (text.contains('instamart') ||
         text.contains('flipkart') ||
         text.contains('amazon') ||
@@ -285,7 +346,7 @@ class FinTraxBrandHelper {
       return 'Shopping';
     }
 
-    // 3. Food & Dining
+    // 4. Food & Dining
     if (text.contains('zomato') ||
         text.contains('swiggy') ||
         text.contains('dominos') ||
@@ -294,7 +355,7 @@ class FinTraxBrandHelper {
         text.contains('mcdonald') ||
         text.contains('pizza hut') ||
         text.contains('burger king')) {
-      return 'Food';
+      return 'Food & Dining';
     }
 
     return null;
@@ -377,22 +438,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
   bool get _isEditingExisting =>
       widget.existingTransaction != null && widget.existingTransaction?.id != null && !widget.isSmsDraft;
 
-  List<Map<String, String>> get _allCategories {
-    final list = List<Map<String, String>>.from(AppConstants.categories);
-    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'investment')) {
-      list.add({'name': 'Investment', 'emoji': '📈'});
-    }
-    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'emi')) {
-      list.add({'name': 'EMI', 'emoji': '🏦'});
-    }
-    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'food')) {
-      list.add({'name': 'Food', 'emoji': '🍔'});
-    }
-    if (!list.any((c) => (c['name'] ?? '').toLowerCase() == 'shopping')) {
-      list.add({'name': 'Shopping', 'emoji': '🛍️'});
-    }
-    return list;
-  }
+  List<Map<String, String>> get _allCategories => FinTraxBrandHelper.allCategories;
 
   @override
   void initState() {
@@ -439,6 +485,8 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       if (autoCat != null && mounted) {
         setState(() => _selectedCategory = autoCat);
       }
+    } else {
+      setState(() {});
     }
   }
 
@@ -459,14 +507,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         setState(() => _otherBooks = filtered);
       }
     } catch (_) {}
-  }
-
-  String _getEmojiForCategory(String? catName) {
-    if (catName == null || catName.isEmpty) return '🏷️';
-    for (final c in _allCategories) {
-      if (c['name']!.toLowerCase() == catName.toLowerCase()) return c['emoji'] ?? '🏷️';
-    }
-    return '🏷️';
   }
 
   Future<void> _pickTransactionDate() async {
@@ -602,14 +642,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     required bool isSelected,
     required Color accentColor,
     required VoidCallback onTap,
+    bool isWarningHabit = false,
   }) {
+    final Color effectiveAccent = isWarningHabit ? AppConstants.expenseRed : accentColor;
     final Color cardBg = isSelected
-        ? accentColor.withOpacity(isDark ? 0.20 : 0.12)
-        : (isDark ? const Color(0xFF1A1C22) : const Color(0xFFF8FAFC));
+        ? effectiveAccent.withOpacity(isDark ? 0.20 : 0.12)
+        : isWarningHabit
+            ? AppConstants.expenseRed.withOpacity(isDark ? 0.08 : 0.05)
+            : (isDark ? const Color(0xFF1A1C22) : const Color(0xFFF8FAFC));
 
     final Color borderColor = isSelected
-        ? accentColor
-        : (isDark ? AppConstants.borderDark : AppConstants.borderLight);
+        ? effectiveAccent
+        : isWarningHabit
+            ? AppConstants.expenseRed.withOpacity(0.35)
+            : (isDark ? AppConstants.borderDark : AppConstants.borderLight);
 
     return Material(
       color: cardBg,
@@ -643,12 +689,13 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12.5,
-                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                    color: isWarningHabit ? AppConstants.expenseRed : null,
+                    fontWeight: isSelected || isWarningHabit ? FontWeight.w800 : FontWeight.w600,
                   ),
                 ),
               ),
               if (isSelected)
-                Icon(Icons.check_circle_rounded, color: accentColor, size: 16),
+                Icon(Icons.check_circle_rounded, color: effectiveAccent, size: 16),
             ],
           ),
         ),
@@ -668,6 +715,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     for (int i = 0; i < options.length; i += 2) {
       final first = options[i];
       final second = (i + 1 < options.length) ? options[i + 1] : null;
+      final bool firstIsVice = first['name'] == FinTraxBrandHelper.vicesCategoryName;
+      final bool secondIsVice = second != null && second['name'] == FinTraxBrandHelper.vicesCategoryName;
+
       rows.add(
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
@@ -680,6 +730,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   title: first['label'] ?? 'None',
                   isSelected: _selectedCategory == first['name'],
                   accentColor: scheme.primary,
+                  isWarningHabit: firstIsVice,
                   onTap: () {
                     HapticFeedback.selectionClick();
                     setState(() => _selectedCategory = first['name']);
@@ -696,6 +747,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                         title: second['label'] ?? '',
                         isSelected: _selectedCategory == second['name'],
                         accentColor: scheme.primary,
+                        isWarningHabit: secondIsVice,
                         onTap: () {
                           HapticFeedback.selectionClick();
                           setState(() => _selectedCategory = second['name']);
@@ -1082,12 +1134,83 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (mounted) Navigator.pop(context, true);
   }
 
+  Widget _buildImagePreviewTile(bool isDark, int idx, {double? width, required double height}) {
+    final path = _imagePaths[idx];
+    return Container(
+      width: width,
+      height: height,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF181A20) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF323642) : const Color(0xFFCBD5E1),
+          width: 1.2,
+        ),
+      ),
+      child: Stack(
+        alignment: Alignment.topRight,
+        children: [
+          GestureDetector(
+            onTap: () => _openImageGalleryFullScreen(idx),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.file(
+                File(path),
+                width: double.infinity,
+                height: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(6.0),
+            child: CircleAvatar(
+              radius: 14,
+              backgroundColor: Colors.black54,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.close, size: 16, color: Colors.white),
+                onPressed: () => _confirmAndDeleteImage(idx),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdaptiveImagesSection(bool isDark) {
+    if (_imagePaths.length == 1) {
+      return _buildImagePreviewTile(isDark, 0, width: double.infinity, height: 165);
+    }
+    if (_imagePaths.length == 2) {
+      return Row(
+        children: [
+          Expanded(child: _buildImagePreviewTile(isDark, 0, height: 145)),
+          const SizedBox(width: 10),
+          Expanded(child: _buildImagePreviewTile(isDark, 1, height: 145)),
+        ],
+      );
+    }
+    return SizedBox(
+      height: 130,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _imagePaths.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (ctx, idx) => _buildImagePreviewTile(isDark, idx, width: 130, height: 130),
+      ),
+    );
+  }
+
   Widget _buildCompactSelectorCard({
     required bool isDark,
     required String label,
     required String valueText,
     required Widget iconWidget,
     required VoidCallback onTap,
+    Color? valueColor,
   }) {
     return Material(
       color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
@@ -1130,7 +1253,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                       valueText,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: valueColor,
+                      ),
                     ),
                   ],
                 ),
@@ -1307,6 +1434,10 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
         : (widget.existingTransaction == null ? 'Add $_selectedType' : 'Edit $_selectedType');
 
     final paymentIconAsset = FinTraxBrandHelper.getPaymentIconAsset(_paymentMode, smsBody: _smsText);
+    final merchantAppAsset = FinTraxBrandHelper.getMerchantIconAsset(_nameController.text, smsBody: _smsText);
+    final bool isVicesSelected = _selectedCategory == FinTraxBrandHelper.vicesCategoryName;
+
+    final Color dullNoteColor = isDark ? Colors.grey[600]! : Colors.grey[400]!;
 
     return Scaffold(
       appBar: AppBar(
@@ -1361,7 +1492,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     isDark: isDark,
                     label: 'Category',
                     valueText: _selectedCategory ?? 'None',
-                    iconWidget: Text(_getEmojiForCategory(_selectedCategory), style: const TextStyle(fontSize: 16)),
+                    valueColor: isVicesSelected ? AppConstants.expenseRed : null,
+                    iconWidget: FinTraxBrandHelper.buildIconBadge(
+                      assetPath: merchantAppAsset,
+                      fallbackEmoji: FinTraxBrandHelper.getCategoryEmoji(_selectedCategory),
+                      size: 20,
+                    ),
                     onTap: () => _openCategoryPicker(isDark),
                   ),
                 ),
@@ -1391,8 +1527,11 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               maxLines: 3,
               decoration: InputDecoration(
                 labelText: 'Notes (Optional)',
+                labelStyle: TextStyle(color: dullNoteColor, fontSize: 13.5, fontWeight: FontWeight.w400),
+                floatingLabelStyle: TextStyle(color: dullNoteColor, fontSize: 12, fontWeight: FontWeight.w500),
                 hintText: 'Add any extra details about this payment...',
-                prefixIcon: const Icon(Icons.sticky_note_2_outlined, size: 20),
+                hintStyle: TextStyle(color: dullNoteColor, fontSize: 13, fontWeight: FontWeight.w400),
+                prefixIcon: Icon(Icons.sticky_note_2_outlined, size: 20, color: dullNoteColor),
                 filled: true,
                 fillColor: isDark ? AppConstants.cardDark : AppConstants.cardLight,
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
@@ -1433,58 +1572,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             ),
             if (_imagePaths.isNotEmpty) ...[
               const SizedBox(height: 12),
-              SizedBox(
-                height: 130,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _imagePaths.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
-                  itemBuilder: (ctx, idx) {
-                    final path = _imagePaths[idx];
-                    return Container(
-                      width: 130,
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF181A20) : const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: isDark ? const Color(0xFF323642) : const Color(0xFFCBD5E1),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.topRight,
-                        children: [
-                          GestureDetector(
-                            onTap: () => _openImageGalleryFullScreen(idx),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: Image.file(
-                                File(path),
-                                width: double.infinity,
-                                height: double.infinity,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.all(4.0),
-                            child: CircleAvatar(
-                              radius: 13,
-                              backgroundColor: Colors.black54,
-                              child: IconButton(
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(Icons.close, size: 15, color: Colors.white),
-                                onPressed: () => _confirmAndDeleteImage(idx),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
+              _buildAdaptiveImagesSection(isDark),
               const SizedBox(height: 6),
               Text(
                 'Tap any image to view full screen • Tap + above to attach more',
