@@ -1514,27 +1514,20 @@ class _BooksScreenState extends State<BooksScreen> {
       await _loadBooks();
       if (!mounted) return;
 
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.clearSnackBars();
-      messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 2),
-          content: Text('Deleted "$bookName"'),
-          action: SnackBarAction(
-            label: 'UNDO',
-            textColor: AppConstants.goldAccent,
-            onPressed: () async {
-              final restoreDb = await DatabaseHelper.instance.database;
-              if (bookRows.isNotEmpty) {
-                await restoreDb.insert('books', Map<String, Object?>.from(bookRows.first));
-              }
-              for (final tx in txRows) {
-                await restoreDb.insert('transactions', Map<String, Object?>.from(tx));
-              }
-              await _loadBooks();
-            },
-          ),
-        ),
+        FinTraxBrandHelper.showModernUndoBar(
+        messenger: ScaffoldMessenger.of(context),
+        message: 'Deleted "$bookName"',
+        onUndo: () async {
+          final restoreDb = await DatabaseHelper.instance.database;
+          if (bookRows.isNotEmpty) {
+            await restoreDb.insert('books', Map<String, Object?>.from(bookRows.first));
+          }
+          for (final tx in txRows) {
+            await restoreDb.insert('transactions', Map<String, Object?>.from(tx));
+          }
+          await _loadBooks();
+        },
+      );
       );
     }
   }
