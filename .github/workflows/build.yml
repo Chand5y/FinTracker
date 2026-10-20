@@ -752,7 +752,7 @@ jobs:
           }
           EOF
         
-           - name: Set Automatic App Version
+      - name: Set Automatic App Version
         id: app_version
         shell: bash
         run: |
@@ -773,14 +773,10 @@ jobs:
               content = f.read()
 
           version_line = f"version: {version_name}+{version_code}"
+          pattern = r"(?m)^version:\s*.*$"
 
-          if re.search(r"(?m)^version:\s*.*$", content):
-              content = re.sub(
-                  r"(?m)^version:\s*.*$",
-                  version_line,
-                  content,
-                  count=1,
-              )
+          if re.search(pattern, content):
+              content = re.sub(pattern, version_line, content, count=1)
           else:
               content = version_line + "\n" + content
 
@@ -795,8 +791,9 @@ jobs:
           echo "Android Version Code: $VERSION_CODE"
           echo "=============================================="
 
-      - run: flutter pub get
-      
+      - name: Install Flutter Packages
+        run: flutter pub get
+
       - name: Generate App Icon
         run: dart run flutter_launcher_icons
 
@@ -970,9 +967,11 @@ jobs:
           mkdir -p release-apks
 
       - name: Build Combined Universal APK
+        shell: bash
         run: |
           flutter build apk \
             --release \
+            --target-platform android-arm,android-arm64 \
             --build-name="${{ steps.app_version.outputs.version_name }}" \
             --build-number="${{ steps.app_version.outputs.version_code }}"
 
