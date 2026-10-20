@@ -121,8 +121,11 @@ class DebugLogsScreen extends StatelessWidget {
               HapticFeedback.lightImpact();
               await Clipboard.setData(ClipboardData(text: AppLogger.instance.dumpAllText()));
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Logs copied to clipboard!'), backgroundColor: AppConstants.incomeGreen),
+                FinTraxBrandHelper.showModernSnackBar(
+                  context: context,
+                  message: 'Logs copied to clipboard!',
+                  icon: Icons.copy_all_rounded,
+                  color: AppConstants.incomeGreen,
                 );
               }
             },
@@ -140,11 +143,11 @@ class DebugLogsScreen extends StatelessWidget {
               HapticFeedback.mediumImpact();
               final savedPath = await AppLogger.instance.saveLogsToDownloads();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(savedPath != null ? 'Saved to: $savedPath' : 'Save failed. Use Copy instead.'),
-                    backgroundColor: savedPath != null ? AppConstants.incomeGreen : AppConstants.expenseRed,
-                  ),
+                FinTraxBrandHelper.showModernSnackBar(
+                  context: context,
+                  message: savedPath != null ? 'Saved to: $savedPath' : 'Save failed. Use Copy instead.',
+                  icon: savedPath != null ? Icons.download_done_rounded : Icons.error_outline_rounded,
+                  color: savedPath != null ? AppConstants.incomeGreen : AppConstants.expenseRed,
                 );
               }
             },
@@ -824,11 +827,22 @@ class _BooksScreenState extends State<BooksScreen> {
 
   Future<void> _startupSequence() async {
     Set<String> handledSet = <String>{};
+    List<Map<String, dynamic>> existingBooks = <Map<String, dynamic>>[];
     try {
       handledSet = await DatabaseHelper.instance
           .getHandledSmsIds()
           .timeout(const Duration(seconds: 2), onTimeout: () => <String>{});
+      existingBooks = await DatabaseHelper.instance
+          .getBooksWithBalances()
+          .timeout(const Duration(seconds: 2), onTimeout: () => <Map<String, dynamic>>[]);
     } catch (_) {}
+
+    if (existingBooks.isNotEmpty && !handledSet.contains('__onboarding_v1_done__')) {
+      try {
+        await DatabaseHelper.instance.markSmsHandled('__onboarding_v1_done__', 'done');
+        handledSet.add('__onboarding_v1_done__');
+      } catch (_) {}
+    }
 
     if (!handledSet.contains('__onboarding_v1_done__')) {
       if (mounted) {
@@ -945,7 +959,8 @@ class _BooksScreenState extends State<BooksScreen> {
       final account = await _googleAuth.signInSilently();
       if (account == null) return;
       final headers = await account.authHeaders;
-      final payload = await DatabaseHelper.instance.exportDatabaseJson();
+      final rawPayload = await DatabaseHelper.instance.exportDatabaseJson();
+      final payload = await FinTraxBrandHelper.enrichBackupJsonWithImagesAndContacts(rawPayload);
       final uploadedId = await _pushBackupToDrive(headers, payload);
       if (uploadedId != null && uploadedId.isNotEmpty) {
         await prefs.recordBackupSuccess(
@@ -1356,11 +1371,11 @@ class _BooksScreenState extends State<BooksScreen> {
                   if (id == -1) {
                     HapticFeedback.heavyImpact();
                     if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('A book with this name already exists.'),
-                          backgroundColor: AppConstants.expenseRed,
-                        ),
+                      FinTraxBrandHelper.showModernSnackBar(
+                        context: ctx,
+                        message: 'A book with this name already exists.',
+                        icon: Icons.warning_amber_rounded,
+                        color: AppConstants.expenseRed,
                       );
                     }
                   } else {
@@ -1457,11 +1472,11 @@ class _BooksScreenState extends State<BooksScreen> {
                   if (res == -1) {
                     HapticFeedback.heavyImpact();
                     if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('A book with this name already exists.'),
-                          backgroundColor: AppConstants.expenseRed,
-                        ),
+                      FinTraxBrandHelper.showModernSnackBar(
+                        context: ctx,
+                        message: 'A book with this name already exists.',
+                        icon: Icons.warning_amber_rounded,
+                        color: AppConstants.expenseRed,
                       );
                     }
                     return;
@@ -1509,12 +1524,14 @@ class _BooksScreenState extends State<BooksScreen> {
       final db = await DatabaseHelper.instance.database;
       final bookRows = await db.query('books', where: 'id = ?', whereArgs: [bookId]);
       final txRows = await db.query('transactions', where: 'bookId = ?', whereArgs: [bookId]);
+      final contactBackup = await FinTraxBrandHelper.getBookContact(bookId);
 
       await DatabaseHelper.instance.deleteBook(bookId);
+      await FinTraxBrandHelper.saveBookContact(bookId, '', '');
       await _loadBooks();
       if (!mounted) return;
 
-        FinTraxBrandHelper.showModernUndoBar(
+      FinTraxBrandHelper.showModernUndoBar(
         messenger: ScaffoldMessenger.of(context),
         message: 'Deleted "$bookName"',
         onUndo: () async {
@@ -1524,6 +1541,13 @@ class _BooksScreenState extends State<BooksScreen> {
           }
           for (final tx in txRows) {
             await restoreDb.insert('transactions', Map<String, Object?>.from(tx));
+          }
+          if ((contactBackup['phone'] ?? '').isNotEmpty || (contactBackup['photoBase64'] ?? '').isNotEmpty) {
+            await FinTraxBrandHelper.saveBookContact(
+              bookId,
+              contactBackup['phone'] ?? '',
+              contactBackup['photoBase64'] ?? '',
+            );
           }
           await _loadBooks();
         },
@@ -2047,11 +2071,11 @@ class _BooksScreenState extends State<BooksScreen> {
                       }) ??
                       false;
                   if (mounted && ok) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('PDF saved to Downloads successfully!'),
-                        backgroundColor: AppConstants.incomeGreen,
-                      ),
+                    FinTraxBrandHelper.showModernSnackBar(
+                      context: context,
+                      message: 'PDF saved to Downloads successfully!',
+                      icon: Icons.picture_as_pdf_rounded,
+                      color: AppConstants.incomeGreen,
                     );
                   }
                 },
@@ -2415,7 +2439,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // GOOGLE DRIVE CLOUD SYNC
+  // GOOGLE DRIVE CLOUD SYNC (WITH FULL IMAGE & CONTACT RESTORE)
   // ===========================================================================
   void _showProgressModal(String label) {
     showDialog(
@@ -2494,7 +2518,7 @@ class _BooksScreenState extends State<BooksScreen> {
           'Google Play Services rejected the sign-in: ${e.message ?? e.code}\n\n'
           'Live APK Package: $livePkg\n'
           'Live APK SHA-1:\n$liveSha1\n\n'
-          'If this account is not yet added under Google Cloud Console -> Audience -> Test Users, add the email there while the app is in Testing mode.',
+          'If Google shows an Unverified App screen, tap "Advanced" -> "Go to FinTrax (unsafe)" to continue.',
         );
       }
       return null;
@@ -2570,6 +2594,65 @@ class _BooksScreenState extends State<BooksScreen> {
     return utf8.decode(resp.bodyBytes);
   }
 
+  /// Shows the Restore confirmation modal (used both when connecting an account and when tapping Restore)
+  Future<bool> _promptRestoreFoundBackup(
+    GoogleSignInAccount user,
+    String rawJson,
+    ThemeProvider prefs,
+  ) async {
+    String backupDateText = 'Unknown date';
+    String exportedIso = '';
+    int bookTotal = 0;
+    int txTotal = 0;
+    try {
+      final parsed = jsonDecode(rawJson) as Map<String, dynamic>;
+      exportedIso = parsed['exportedAt']?.toString() ?? '';
+      final dt = DateTime.tryParse(exportedIso);
+      if (dt != null) backupDateText = AppConstants.formatOrdinalDateTime(dt);
+      bookTotal = ((parsed['books'] as List<dynamic>?) ?? []).length;
+      txTotal = ((parsed['transactions'] as List<dynamic>?) ?? []).length;
+    } catch (_) {}
+
+    if (!mounted) return false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Google Drive Backup Found', style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Text(
+          'Account: ${user.email}\nLast Backup: $backupDateText\nContents: $bookTotal Book(s), $txTotal Entries\n\nRestore this cloud backup into FinTrax?',
+          style: const TextStyle(fontSize: 13.5, height: 1.45),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restore Now')),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      if (mounted) _showProgressModal('Restoring books & attachments...');
+      final count = await DatabaseHelper.instance.importDatabaseJson(rawJson);
+      await FinTraxBrandHelper.restoreImagesAndContactsFromBackupJson(rawJson);
+      if (exportedIso.isNotEmpty) {
+        await prefs.recordBackupSuccess(isoTimestamp: exportedIso, dayKey: _todayStamp());
+      }
+      await _loadBooks();
+      if (mounted) {
+        Navigator.pop(context);
+        FinTraxBrandHelper.showModernSnackBar(
+          context: context,
+          message: 'Restored $count book(s) from Google Drive!',
+          icon: Icons.cloud_done_rounded,
+          color: AppConstants.incomeGreen,
+        );
+      }
+      return true;
+    }
+    return false;
+  }
+
   Future<void> _onSwitchDriveAccount(ThemeProvider prefs) async {
     HapticFeedback.lightImpact();
     final user = await _signInForDrive(prefs, switchAccount: true);
@@ -2588,15 +2671,23 @@ class _BooksScreenState extends State<BooksScreen> {
           await prefs.recordBackupSuccess(isoTimestamp: ts, dayKey: prefs.lastAutoBackupDay);
         }
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Connected to ${user.email} • Existing cloud backup found!'),
-              backgroundColor: AppConstants.incomeGreen,
-            ),
-          );
+          final restored = await _promptRestoreFoundBackup(user, existing, prefs);
+          if (!restored && mounted) {
+            FinTraxBrandHelper.showModernSnackBar(
+              context: context,
+              message: 'Connected to ${user.email}',
+              icon: Icons.check_circle_rounded,
+              color: AppConstants.incomeGreen,
+            );
+          }
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connected to ${user.email}')));
+        FinTraxBrandHelper.showModernSnackBar(
+          context: context,
+          message: 'Connected to ${user.email}',
+          icon: Icons.check_circle_rounded,
+          color: AppConstants.incomeGreen,
+        );
       }
     } catch (e) {
       if (mounted) Navigator.pop(context);
@@ -2609,10 +2700,11 @@ class _BooksScreenState extends State<BooksScreen> {
     final user = await _signInForDrive(prefs);
     if (user == null || !mounted) return;
 
-    _showProgressModal('Uploading backup to Google Drive...');
+    _showProgressModal('Uploading backup & images to Google Drive...');
     try {
       final headers = await user.authHeaders;
-      final payload = await DatabaseHelper.instance.exportDatabaseJson();
+      final rawPayload = await DatabaseHelper.instance.exportDatabaseJson();
+      final payload = await FinTraxBrandHelper.enrichBackupJsonWithImagesAndContacts(rawPayload);
       final fileId = await _pushBackupToDrive(headers, payload);
       if (mounted) Navigator.pop(context);
 
@@ -2622,11 +2714,11 @@ class _BooksScreenState extends State<BooksScreen> {
           dayKey: _todayStamp(),
         );
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Cloud Backup saved to Google Drive (${user.email})'),
-              backgroundColor: AppConstants.incomeGreen,
-            ),
+          FinTraxBrandHelper.showModernSnackBar(
+            context: context,
+            message: 'Cloud Backup saved to Google Drive!',
+            icon: Icons.cloud_upload_rounded,
+            color: AppConstants.incomeGreen,
           );
         }
       }
@@ -2668,50 +2760,7 @@ class _BooksScreenState extends State<BooksScreen> {
       return;
     }
 
-    String backupDateText = 'Unknown date';
-    String exportedIso = '';
-    int bookTotal = 0;
-    int txTotal = 0;
-    try {
-      final parsed = jsonDecode(rawJson) as Map<String, dynamic>;
-      exportedIso = parsed['exportedAt']?.toString() ?? '';
-      final dt = DateTime.tryParse(exportedIso);
-      if (dt != null) backupDateText = AppConstants.formatOrdinalDateTime(dt);
-      bookTotal = ((parsed['books'] as List<dynamic>?) ?? []).length;
-      txTotal = ((parsed['transactions'] as List<dynamic>?) ?? []).length;
-    } catch (_) {}
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Google Drive Backup Found', style: TextStyle(fontWeight: FontWeight.w700)),
-        content: Text(
-          'Account: ${user.email}\nLast Backup: $backupDateText\nContents: $bookTotal Book(s), $txTotal Entries\n\nRestore this cloud backup into FinTrax?',
-          style: const TextStyle(fontSize: 13.5, height: 1.45),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restore Now')),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      final count = await DatabaseHelper.instance.importDatabaseJson(rawJson);
-      if (exportedIso.isNotEmpty) {
-        await prefs.recordBackupSuccess(isoTimestamp: exportedIso, dayKey: _todayStamp());
-      }
-      await _loadBooks();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Restored $count book(s) from Google Drive (${user.email})!'),
-            backgroundColor: AppConstants.incomeGreen,
-          ),
-        );
-      }
-    }
+    await _promptRestoreFoundBackup(user, rawJson, prefs);
   }
 
   Future<void> _toggleBiometricLock(ThemeProvider prefs, bool enabled) async {
@@ -2722,8 +2771,11 @@ class _BooksScreenState extends State<BooksScreen> {
     final secure = await _nativeBridge.invokeMethod<bool>('isDeviceSecure') ?? false;
     if (!secure) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please set up a Fingerprint or Screen Lock in your phone settings first.')),
+        FinTraxBrandHelper.showModernSnackBar(
+          context: context,
+          message: 'Please set up a Fingerprint or Screen Lock in phone settings first.',
+          icon: Icons.fingerprint_rounded,
+          color: AppConstants.goldAccent,
         );
       }
       return;
@@ -2749,8 +2801,11 @@ class _BooksScreenState extends State<BooksScreen> {
         'minute': picked.minute,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Daily reminder set for ${AppConstants.formatTimeOfDay(picked.hour, picked.minute)}')),
+        FinTraxBrandHelper.showModernSnackBar(
+          context: context,
+          message: 'Daily reminder set for ${AppConstants.formatTimeOfDay(picked.hour, picked.minute)}',
+          icon: Icons.notifications_active_rounded,
+          color: AppConstants.incomeGreen,
         );
       }
     }
@@ -3049,7 +3104,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
-                                                // Line 1: Full-width Book Title + Balance Amount
                                                 Row(
                                                   crossAxisAlignment: CrossAxisAlignment.center,
                                                   children: [
@@ -3073,7 +3127,6 @@ class _BooksScreenState extends State<BooksScreen> {
                                                   ],
                                                 ),
                                                 const SizedBox(height: 6),
-                                                // Line 2: Clean 2-Line Metadata (Updated Time + Created on Date Pill)
                                                 Row(
                                                   children: [
                                                     Icon(Icons.schedule_rounded, size: 11.5, color: Colors.grey[500]),
@@ -3249,8 +3302,11 @@ class _BooksScreenState extends State<BooksScreen> {
                   final ok = await _nativeBridge.invokeMethod<bool>('requestSmsPermission') ?? false;
                   if (!ok) {
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('SMS permission is required to suggest bank transactions.')),
+                      FinTraxBrandHelper.showModernSnackBar(
+                        context: context,
+                        message: 'SMS permission is required to suggest bank transactions.',
+                        icon: Icons.sms_failed_outlined,
+                        color: AppConstants.expenseRed,
                       );
                     }
                     return;
