@@ -1528,7 +1528,6 @@ class _BooksScreenState extends State<BooksScreen> {
           await _loadBooks();
         },
       );
-      );
     }
   }
 
