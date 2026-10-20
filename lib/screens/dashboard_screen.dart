@@ -376,22 +376,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       await _refreshTransactions();
       if (!mounted) return;
 
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.clearSnackBars();
-      messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 2),
-          content: Text('Deleted "$displayTitle"'),
-          action: SnackBarAction(
-            label: 'UNDO',
-            textColor: AppConstants.goldAccent,
-            onPressed: () async {
-              final db = await DatabaseHelper.instance.database;
-              await db.insert('transactions', backupMap);
-              FinTraxBrandHelper.dataRefreshNotifier.value++;
-            },
-          ),
-        ),
+      FinTraxBrandHelper.showModernUndoBar(
+        messenger: ScaffoldMessenger.of(context),
+        message: 'Deleted "$displayTitle"',
+        onUndo: () async {
+          final db = await DatabaseHelper.instance.database;
+          await db.insert('transactions', backupMap);
+          FinTraxBrandHelper.dataRefreshNotifier.value++;
+        },
       );
     }
   }
