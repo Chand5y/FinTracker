@@ -12,6 +12,115 @@ import '../data/transaction_model.dart';
 // ===========================================================================
 class FinTraxBrandHelper {
   static final ValueNotifier<int> dataRefreshNotifier = ValueNotifier<int>(0);
+  static Timer? _undoTimer;
+
+  static void showModernUndoBar({
+    required ScaffoldMessengerState messenger,
+    required String message,
+    required VoidCallback onUndo,
+  }) {
+    _undoTimer?.cancel();
+    messenger.clearSnackBars();
+
+    bool undone = false;
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        padding: EdgeInsets.zero,
+        duration: const Duration(milliseconds: 1000),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121A2B),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: AppConstants.goldAccent.withOpacity(0.45),
+              width: 1.1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.28),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppConstants.expenseRed.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: AppConstants.expenseRed,
+                  size: 17,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  message,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Material(
+                color: AppConstants.goldAccent,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    if (undone) return;
+                    undone = true;
+                    _undoTimer?.cancel();
+                    HapticFeedback.lightImpact();
+                    messenger.removeCurrentSnackBar();
+                    onUndo();
+                  },
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.undo_rounded, size: 14, color: Color(0xFF0E1726)),
+                        SizedBox(width: 4),
+                        Text(
+                          'Undo',
+                          style: TextStyle(
+                            color: Color(0xFF0E1726),
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    _undoTimer = Timer(const Duration(milliseconds: 1000), () {
+      try {
+        messenger.removeCurrentSnackBar();
+      } catch (_) {}
+    });
+  }
 
   static const String vicesCategoryName = 'Vices & Addictions';
 
@@ -557,28 +666,20 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       ),
     );
 
-    if (confirmed == true && mounted) {
+     if (confirmed == true && mounted) {
       final String removedPath = _imagePaths[idx];
       setState(() => _imagePaths.removeAt(idx));
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.clearSnackBars();
-      messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 2),
-          content: const Text('Image removed'),
-          action: SnackBarAction(
-            label: 'UNDO',
-            textColor: AppConstants.goldAccent,
-            onPressed: () {
-              if (mounted) {
-                setState(() {
-                  final insertPos = idx.clamp(0, _imagePaths.length);
-                  _imagePaths.insert(insertPos, removedPath);
-                });
-              }
-            },
-          ),
-        ),
+      FinTraxBrandHelper.showModernUndoBar(
+        messenger: ScaffoldMessenger.of(context),
+        message: 'Image removed',
+        onUndo: () {
+          if (mounted) {
+            setState(() {
+              final insertPos = idx.clamp(0, _imagePaths.length);
+              _imagePaths.insert(insertPos, removedPath);
+            });
+          }
+        },
       );
     }
   }
@@ -617,21 +718,14 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context, true);
 
-      messenger.clearSnackBars();
-      messenger.showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 2),
-          content: Text('Deleted "${txToBackup.name}"'),
-          action: SnackBarAction(
-            label: 'UNDO',
-            textColor: AppConstants.goldAccent,
-            onPressed: () async {
-              final db = await DatabaseHelper.instance.database;
-              await db.insert('transactions', backupMap);
-              FinTraxBrandHelper.dataRefreshNotifier.value++;
-            },
-          ),
-        ),
+      FinTraxBrandHelper.showModernUndoBar(
+        messenger: messenger,
+        message: 'Deleted "${txToBackup.name}"',
+        onUndo: () async {
+          final db = await DatabaseHelper.instance.database;
+          await db.insert('transactions', backupMap);
+          FinTraxBrandHelper.dataRefreshNotifier.value++;
+        },
       );
     }
   }
