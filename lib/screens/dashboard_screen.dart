@@ -335,7 +335,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-
   double _calculateTotal(String type) {
     return _transactions.where((t) => t.type == type).fold(0.0, (sum, item) => sum + item.amount);
   }
@@ -695,7 +694,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     : (isDark ? AppConstants.borderDark : AppConstants.borderLight),
               ),
             ),
-              child: Column(
+            child: Column(
               children: [
                 if (isLending && (_contactPhone.isNotEmpty || _contactPhotoBytes != null)) ...[
                   Row(
@@ -739,7 +738,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   children: [
                     Text(
                       isLending ? 'Net Pending / Balance' : 'Net Balance',
-
                       style: TextStyle(color: isDark ? Colors.grey[400] : Colors.grey[700], fontSize: 15, fontWeight: FontWeight.w500),
                     ),
                     Text(
@@ -809,6 +807,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ) ??
                           tx.category;
                       final bool isInvestment = effectiveCategory.toLowerCase() == 'investment';
+                      final bool isVices = effectiveCategory == FinTraxBrandHelper.vicesCategoryName;
 
                       final String displayPaymentMode = FinTraxBrandHelper.detectPaymentMethod(
                         currentMode: tx.paymentMode,
@@ -824,6 +823,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         displayTitle,
                         smsBody: tx.effectiveSmsText,
                       );
+                      final bool showSecondBadge = merchantIconAsset != null || effectiveCategory.isNotEmpty;
 
                       final Color borderColor = isInvestment
                           ? AppConstants.incomeGreen.withOpacity(isDark ? 0.65 : 0.55)
@@ -855,7 +855,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                                                   Row(
+                                  Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
                                       Expanded(
@@ -880,10 +880,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   if (effectiveCategory.isNotEmpty) ...[
                                     const SizedBox(height: 4),
                                     Text(
-                                      isInvestment ? '📈 Investment' : effectiveCategory,
+                                      isInvestment
+                                          ? '📈 Investment'
+                                          : isVices
+                                              ? '🚭 $effectiveCategory'
+                                              : effectiveCategory,
                                       style: TextStyle(
-                                        color: isInvestment ? AppConstants.incomeGreen : Colors.grey[500],
-                                        fontWeight: isInvestment ? FontWeight.w700 : FontWeight.w500,
+                                        color: isInvestment
+                                            ? AppConstants.incomeGreen
+                                            : isVices
+                                                ? AppConstants.expenseRed
+                                                : Colors.grey[500],
+                                        fontWeight: (isInvestment || isVices) ? FontWeight.w700 : FontWeight.w500,
                                         fontSize: 12,
                                       ),
                                     ),
@@ -925,7 +933,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                   ),
                                                 ],
                                               ),
-                                            ),
+                                      ),
+                                      if (showSecondBadge) ...[
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3.5),
+                                          decoration: BoxDecoration(
+                                            color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: FinTraxBrandHelper.buildIconBadge(
+                                            assetPath: merchantIconAsset,
+                                            fallbackEmoji: FinTraxBrandHelper.getCategoryEmoji(effectiveCategory),
+                                            size: 18,
+                                            borderRadius: 4,
+                                          ),
+                                        ),
+                                      ],
                                       const SizedBox(width: 8),
                                       Text(AppConstants.formatOrdinalDateTime(tx.date), style: TextStyle(fontSize: 11, color: Colors.grey[500])),
                                       const Spacer(),
