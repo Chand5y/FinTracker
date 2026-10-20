@@ -30,7 +30,7 @@ class FinTraxBrandHelper {
         elevation: 0,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
         padding: EdgeInsets.zero,
-        duration: const Duration(milliseconds: 1000),
+        duration: const Duration(seconds: 2),
         content: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
