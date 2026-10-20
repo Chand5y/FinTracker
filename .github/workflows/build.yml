@@ -752,6 +752,49 @@ jobs:
           }
           EOF
         
+           - name: Set Automatic App Version
+        id: app_version
+        shell: bash
+        run: |
+          VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+          python3 - << 'EOF'
+          import os
+          import re
+
+          version_name = f"1.0.{os.environ['GITHUB_RUN_NUMBER']}"
+          version_code = os.environ["GITHUB_RUN_NUMBER"]
+
+          with open("pubspec.yaml", "r", encoding="utf-8") as f:
+              content = f.read()
+
+          version_line = f"version: {version_name}+{version_code}"
+
+          if re.search(r"(?m)^version:\s*.*$", content):
+              content = re.sub(
+                  r"(?m)^version:\s*.*$",
+                  version_line,
+                  content,
+                  count=1,
+              )
+          else:
+              content = version_line + "\n" + content
+
+          with open("pubspec.yaml", "w", encoding="utf-8") as f:
+              f.write(content)
+
+          print(f"FinTrax version set to {version_name}+{version_code}")
+          EOF
+
+          echo "=============================================="
+          echo "FinTrax Version Name: $VERSION_NAME"
+          echo "Android Version Code: $VERSION_CODE"
+          echo "=============================================="
+
       - run: flutter pub get
       
       - name: Generate App Icon
@@ -921,19 +964,100 @@ jobs:
           </resources>
           EOF
         
-      - name: Build Lightweight Split APK
-        run: flutter build apk --release --split-per-abi
-
-      - name: Sign APK with Permanent Key & Verify SHA-1
+      - name: Prepare APK Output Folder
         run: |
-          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          $APKSIGNER sign --ks fintrax.jks --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          rm -rf release-apks
+          mkdir -p release-apks
+
+      - name: Build Combined Universal APK
+        run: |
+          flutter build apk \
+            --release \
+            --build-name="${{ steps.app_version.outputs.version_name }}" \
+            --build-number="${{ steps.app_version.outputs.version_code }}"
+
+          cp \
+            build/app/outputs/flutter-apk/app-release.apk \
+            "release-apks/FinTrax-${{ steps.app_version.outputs.version_name }}-Universal.apk"
+
+      - name: Build 32-bit and 64-bit Split APKs
+        run: |
+          flutter build apk \
+            --release \
+            --split-per-abi \
+            --target-platform android-arm,android-arm64 \
+            --build-name="${{ steps.app_version.outputs.version_name }}" \
+            --build-number="${{ steps.app_version.outputs.version_code }}"
+
+          cp \
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+            "release-apks/FinTrax-${{ steps.app_version.outputs.version_name }}-32bit.apk"
+
+          cp \
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+            "release-apks/FinTrax-${{ steps.app_version.outputs.version_name }}-64bit.apk"
+
+      - name: Sign All APKs with Permanent Key
+        shell: bash
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
+
+          if [ -z "$APKSIGNER" ]; then
+            echo "ERROR: apksigner could not be found."
+            exit 1
+          fi
+
+          echo "Using apksigner: $APKSIGNER"
+
+          for APK in release-apks/*.apk; do
+            echo "Signing: $APK"
+
+            "$APKSIGNER" sign \
+              --ks fintrax.jks \
+              --ks-key-alias androiddebugkey \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              "$APK"
+          done
+
+      - name: Verify APK Signatures
+        shell: bash
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
+
+          for APK in release-apks/*.apk; do
+            echo "=========================================================="
+            echo "Verifying: $APK"
+
+            "$APKSIGNER" verify \
+              --verbose \
+              --print-certs \
+              "$APK"
+          done
+
           echo "=========================================================="
-          $APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
-          echo "=========================================================="
-      
-      - name: Upload APK
+
+      - name: Display Generated APK Files
+        shell: bash
+        run: |
+          echo "FinTrax ${{ steps.app_version.outputs.version_name }}"
+          echo "Generated APK files:"
+          ls -lh release-apks
+
+          APK_COUNT=$(find release-apks -maxdepth 1 -type f -name "*.apk" | wc -l)
+
+          if [ "$APK_COUNT" -ne 3 ]; then
+            echo "ERROR: Expected 3 APK files, but found $APK_COUNT."
+            exit 1
+          fi
+
+          echo "Successfully generated all 3 APK versions."
+
+      - name: Upload All FinTrax APKs
         uses: actions/upload-artifact@v4
         with:
-          name: fintrax-release
-          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          name: FinTrax-${{ steps.app_version.outputs.version_name }}-All-APKs
+          path: release-apks/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
