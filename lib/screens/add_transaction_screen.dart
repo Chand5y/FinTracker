@@ -1,19 +1,99 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import '../core/constants.dart';
 import '../data/database_helper.dart';
 import '../data/transaction_model.dart';
 
 // ===========================================================================
-// SHARED BANK ICON, MERCHANT ICON & AUTO-CATEGORIZATION HELPER
+// SHARED BANK ICON, MERCHANT ICON, CLOUD IMAGE BACKUP & UI HELPER
 // ===========================================================================
 class FinTraxBrandHelper {
   static final ValueNotifier<int> dataRefreshNotifier = ValueNotifier<int>(0);
   static Timer? _undoTimer;
+  static Timer? _toastTimer;
 
+  static const String vicesCategoryName = 'Vices & Addictions';
+
+  /// Modern rounded floating status notification (replaces the old rectangular green bar)
+  static void showModernSnackBar({
+    required BuildContext context,
+    required String message,
+    IconData icon = Icons.check_circle_rounded,
+    Color color = AppConstants.incomeGreen,
+    Duration duration = const Duration(seconds: 2),
+  }) {
+    _toastTimer?.cancel();
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        padding: EdgeInsets.zero,
+        duration: duration,
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121A2B),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: color.withOpacity(0.55),
+              width: 1.15,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.28),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 18),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12.8,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    _toastTimer = Timer(duration, () {
+      try {
+        messenger.removeCurrentSnackBar();
+      } catch (_) {}
+    });
+  }
+
+  /// Modern rounded floating 2-second Undo bar (guaranteed to auto-dismiss on HyperOS/Android)
   static void showModernUndoBar({
     required ScaffoldMessengerState messenger,
     required String message,
@@ -115,14 +195,169 @@ class FinTraxBrandHelper {
       ),
     );
 
-    _undoTimer = Timer(const Duration(milliseconds: 1000), () {
+    _undoTimer = Timer(const Duration(seconds: 2), () {
       try {
         messenger.removeCurrentSnackBar();
       } catch (_) {}
     });
   }
 
-  static const String vicesCategoryName = 'Vices & Addictions';
+  /// Copies picked images into permanent app storage so Android cache cleanup never deletes them
+  static Future<String> persistPickedImageFile(String sourcePath) async {
+    try {
+      final srcFile = File(sourcePath);
+      if (!srcFile.existsSync()) return sourcePath;
+      final docDir = await getApplicationDocumentsDirectory();
+      final attachDir = Directory('${docDir.path}/fintrax_attachments');
+      if (!attachDir.existsSync()) {
+        await attachDir.create(recursive: true);
+      }
+      final ext = sourcePath.contains('.') ? sourcePath.substring(sourcePath.lastIndexOf('.')) : '.jpg';
+      final fileName = 'img_${DateTime.now().microsecondsSinceEpoch}$ext';
+      final targetPath = '${attachDir.path}/$fileName';
+      final copied = await srcFile.copy(targetPath);
+      return copied.path;
+    } catch (_) {
+      return sourcePath;
+    }
+  }
+
+  /// Embeds all attached receipt images & Lending book contacts into the Google Drive backup JSON
+  static Future<String> enrichBackupJsonWithImagesAndContacts(String rawDbJson) async {
+    try {
+      final decoded = jsonDecode(rawDbJson) as Map<String, dynamic>;
+
+      await _ensureContactsTable();
+      final db = await DatabaseHelper.instance.database;
+      final contactRows = await db.query('book_contacts');
+      decoded['book_contacts'] = contactRows;
+
+      final imageMap = <String, String>{};
+      final txs = (decoded['transactions'] as List<dynamic>?) ?? [];
+      for (final item in txs) {
+        if (item is Map) {
+          final rawPath = item['imagePath']?.toString() ?? '';
+          final paths = parseImagePaths(rawPath);
+          for (final p in paths) {
+            if (!imageMap.containsKey(p)) {
+              final f = File(p);
+              if (f.existsSync()) {
+                try {
+                  final bytes = await f.readAsBytes();
+                  if (bytes.isNotEmpty) {
+                    imageMap[p] = base64Encode(bytes);
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+        }
+      }
+      decoded['attached_images_base64'] = imageMap;
+      return jsonEncode(decoded);
+    } catch (_) {
+      return rawDbJson;
+    }
+  }
+
+  /// Restores Lending book contacts and recreates attached receipt image files from Google Drive JSON
+  static Future<void> restoreImagesAndContactsFromBackupJson(String rawJson) async {
+    try {
+      final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
+      final db = await DatabaseHelper.instance.database;
+
+      await _ensureContactsTable();
+      final contactsList = (decoded['book_contacts'] as List<dynamic>?) ?? [];
+      for (final c in contactsList) {
+        if (c is Map) {
+          final bookId = c['bookId'];
+          final phone = c['phone']?.toString() ?? '';
+          final photoBase64 = c['photoBase64']?.toString() ?? '';
+          if (bookId != null) {
+            await db.rawInsert(
+              'INSERT OR REPLACE INTO book_contacts (bookId, phone, photoBase64) VALUES (?, ?, ?)',
+              [bookId, phone, photoBase64],
+            );
+          }
+        }
+      }
+
+      final imageMapRaw = decoded['attached_images_base64'];
+      if (imageMapRaw is Map && imageMapRaw.isNotEmpty) {
+        final docDir = await getApplicationDocumentsDirectory();
+        final attachDir = Directory('${docDir.path}/fintrax_attachments');
+        if (!attachDir.existsSync()) {
+          await attachDir.create(recursive: true);
+        }
+
+        final pathRemap = <String, String>{};
+        int counter = 0;
+        for (final entry in imageMapRaw.entries) {
+          final oldPath = entry.key.toString();
+          final b64 = entry.value?.toString() ?? '';
+          if (b64.isEmpty) continue;
+          try {
+            final bytes = base64Decode(b64);
+            if (bytes.isNotEmpty) {
+              counter++;
+              final newPath = '${attachDir.path}/restored_${DateTime.now().millisecondsSinceEpoch}_$counter.jpg';
+              final outFile = File(newPath);
+              await outFile.writeAsBytes(bytes, flush: true);
+              pathRemap[oldPath] = newPath;
+            }
+          } catch (_) {}
+        }
+
+        if (pathRemap.isNotEmpty) {
+          final txRows = await db.query('transactions');
+          for (final row in txRows) {
+            final txId = row['id'] as int?;
+            final rawImg = row['imagePath']?.toString() ?? '';
+            if (txId == null || rawImg.isEmpty) continue;
+            final oldPaths = parseImagePaths(rawImg);
+            bool changed = false;
+            final updatedPaths = <String>[];
+            for (final p in oldPaths) {
+              if (pathRemap.containsKey(p)) {
+                updatedPaths.add(pathRemap[p]!);
+                changed = true;
+              } else if (File(p).existsSync()) {
+                updatedPaths.add(p);
+              } else {
+                changed = true;
+              }
+            }
+            if (changed) {
+              await db.update(
+                'transactions',
+                {'imagePath': joinImagePaths(updatedPaths)},
+                where: 'id = ?',
+                whereArgs: [txId],
+              );
+            }
+          }
+        }
+      } else {
+        // Clean out broken file paths from older backups that did not embed image bytes
+        final txRows = await db.query('transactions');
+        for (final row in txRows) {
+          final txId = row['id'] as int?;
+          final rawImg = row['imagePath']?.toString() ?? '';
+          if (txId == null || rawImg.isEmpty) continue;
+          final oldPaths = parseImagePaths(rawImg);
+          final validPaths = oldPaths.where((p) => File(p).existsSync()).toList();
+          if (validPaths.length != oldPaths.length) {
+            await db.update(
+              'transactions',
+              {'imagePath': joinImagePaths(validPaths)},
+              where: 'id = ?',
+              whereArgs: [txId],
+            );
+          }
+        }
+      }
+    } catch (_) {}
+  }
 
   static const List<Map<String, String>> paymentMethods = [
     {'name': 'Cash', 'emoji': '💵', 'asset': ''},
@@ -178,8 +413,6 @@ class FinTraxBrandHelper {
     return '🏷️';
   }
 
-  /// Replaces raw SMS sender headers (like JK-UTKSPR-S or UTKSPR-S) with the actual
-  /// merchant name found inside the SMS body (e.g., Flipkart).
   static String resolveMerchantTitle(String currentName, String smsBody) {
     final trimmed = currentName.trim();
     final lowerName = trimmed.toLowerCase();
@@ -326,8 +559,6 @@ class FinTraxBrandHelper {
     return AppConstants.paymentModeEmojis[paymentMode] ?? '💳';
   }
 
-  /// Returns the brand/app icon (Flipkart, Amazon, Zomato, Swiggy, Myntra, Meesho, Jio)
-  /// to display alongside the bank icon or inside the category badge.
   static String? getMerchantIconAsset(String name, {String smsBody = ''}) {
     final text = '$name $smsBody'.toLowerCase();
     if (text.contains('flipkart')) return 'assets/icons/Flipkart.png';
@@ -400,7 +631,6 @@ class FinTraxBrandHelper {
     }
     final text = '$name $smsBody'.toLowerCase();
 
-    // 1. Investment: SIP, Mutual Funds, Stock purchases, Brokers
     if (RegExp(r'\bsip\b').hasMatch(text) ||
         text.contains('mutual fund') ||
         RegExp(r'\bmf\b').hasMatch(text) ||
@@ -426,7 +656,6 @@ class FinTraxBrandHelper {
       return 'Investment';
     }
 
-    // 2. Vices & Addictions (Smoking, Alcohol, Betting, etc.)
     if (text.contains('cigarette') ||
         text.contains('smoke') ||
         text.contains('tobacco') ||
@@ -444,7 +673,6 @@ class FinTraxBrandHelper {
       return vicesCategoryName;
     }
 
-    // 3. Shopping / E-commerce
     if (text.contains('instamart') ||
         text.contains('flipkart') ||
         text.contains('amazon') ||
@@ -456,7 +684,6 @@ class FinTraxBrandHelper {
       return 'Shopping';
     }
 
-    // 4. Food & Dining
     if (text.contains('zomato') ||
         text.contains('swiggy') ||
         text.contains('dominos') ||
@@ -584,7 +811,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       sender: rawName,
     );
 
-    _imagePaths = FinTraxBrandHelper.parseImagePaths(widget.existingTransaction?.imagePath ?? '');
+    // Filter out any non-existent broken paths from older restores so new attachments work cleanly
+    final rawPaths = FinTraxBrandHelper.parseImagePaths(widget.existingTransaction?.imagePath ?? '');
+    _imagePaths = rawPaths;
     _nameController.addListener(_onMerchantNameChanged);
     _loadOtherBooks();
   }
@@ -666,7 +895,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       ),
     );
 
-     if (confirmed == true && mounted) {
+    if (confirmed == true && mounted) {
       final String removedPath = _imagePaths[idx];
       setState(() => _imagePaths.removeAt(idx));
       FinTraxBrandHelper.showModernUndoBar(
@@ -1127,26 +1356,48 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   Future<void> _pickImages() async {
     HapticFeedback.selectionClick();
+    // Automatically clean out any missing/corrupted paths before adding new ones
+    _imagePaths.removeWhere((p) => !File(p).existsSync());
+
     try {
-      final List<XFile> pickedList = await _picker.pickMultiImage(imageQuality: 80);
+      final List<XFile> pickedList = await _picker.pickMultiImage(
+        maxWidth: 1440,
+        maxHeight: 1440,
+        imageQuality: 78,
+      );
       if (pickedList.isNotEmpty && mounted) {
-        setState(() {
-          for (final item in pickedList) {
-            if (!_imagePaths.contains(item.path)) {
-              _imagePaths.add(item.path);
+        final savedPaths = <String>[];
+        for (final item in pickedList) {
+          final permanentPath = await FinTraxBrandHelper.persistPickedImageFile(item.path);
+          savedPaths.add(permanentPath);
+        }
+        if (mounted) {
+          setState(() {
+            for (final p in savedPaths) {
+              if (!_imagePaths.contains(p)) {
+                _imagePaths.add(p);
+              }
             }
-          }
-        });
+          });
+        }
         return;
       }
     } catch (_) {
-      final XFile? single = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+      final XFile? single = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1440,
+        maxHeight: 1440,
+        imageQuality: 78,
+      );
       if (single != null && mounted) {
-        setState(() {
-          if (!_imagePaths.contains(single.path)) {
-            _imagePaths.add(single.path);
-          }
-        });
+        final permanentPath = await FinTraxBrandHelper.persistPickedImageFile(single.path);
+        if (mounted) {
+          setState(() {
+            if (!_imagePaths.contains(permanentPath)) {
+              _imagePaths.add(permanentPath);
+            }
+          });
+        }
       }
     }
   }
@@ -1174,14 +1425,44 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               controller: pageCtrl,
               itemCount: _imagePaths.length,
               onPageChanged: (i) => setGalleryState(() => currentIdx = i),
-              itemBuilder: (_, idx) => Center(
-                child: InteractiveViewer(
-                  panEnabled: true,
-                  minScale: 0.5,
-                  maxScale: 4.0,
-                  child: Image.file(File(_imagePaths[idx])),
-                ),
-              ),
+              itemBuilder: (_, idx) {
+                final file = File(_imagePaths[idx]);
+                final exists = file.existsSync();
+                return Center(
+                  child: InteractiveViewer(
+                    panEnabled: true,
+                    minScale: 0.5,
+                    maxScale: 4.0,
+                    child: exists
+                        ? Image.file(
+                            file,
+                            errorBuilder: (_, __, ___) => const Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.broken_image_rounded, color: Colors.white54, size: 64),
+                                SizedBox(height: 12),
+                                Text(
+                                  'Unable to load this image file',
+                                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                                ),
+                              ],
+                            ),
+                          )
+                        : const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.image_not_supported_outlined, color: Colors.white54, size: 64),
+                              SizedBox(height: 12),
+                              Text(
+                                'Image Missing on Device\n(Delete this attachment & re-attach)',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+                              ),
+                            ],
+                          ),
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -1193,12 +1474,18 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     if (!_formKey.currentState!.validate()) return;
     final double? parsedAmount = double.tryParse(_amountController.text.trim());
     if (parsedAmount == null || parsedAmount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount.')));
+      FinTraxBrandHelper.showModernSnackBar(
+        context: context,
+        message: 'Please enter a valid amount.',
+        icon: Icons.error_outline_rounded,
+        color: AppConstants.expenseRed,
+      );
       return;
     }
 
     HapticFeedback.mediumImpact();
 
+    final validPaths = _imagePaths.where((p) => File(p).existsSync()).toList();
     final bool isNewInsert = widget.existingTransaction == null || widget.existingTransaction?.id == null;
 
     final transaction = TransactionModel(
@@ -1213,7 +1500,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       date: _selectedDate,
       currency: AppConstants.defaultCurrency,
       paymentMode: _paymentMode,
-      imagePath: FinTraxBrandHelper.joinImagePaths(_imagePaths),
+      imagePath: FinTraxBrandHelper.joinImagePaths(validPaths),
     );
 
     if (isNewInsert) {
@@ -1231,6 +1518,9 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
 
   Widget _buildImagePreviewTile(bool isDark, int idx, {double? width, required double height}) {
     final path = _imagePaths[idx];
+    final file = File(path);
+    final exists = file.existsSync();
+
     return Container(
       width: width,
       height: height,
@@ -1250,12 +1540,44 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
             onTap: () => _openImageGalleryFullScreen(idx),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(10),
-              child: Image.file(
-                File(path),
-                width: double.infinity,
-                height: double.infinity,
-                fit: BoxFit.cover,
-              ),
+              child: exists
+                  ? Image.file(
+                      file,
+                      key: ValueKey(path),
+                      width: double.infinity,
+                      height: double.infinity,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => Container(
+                        width: double.infinity,
+                        height: double.infinity,
+                        alignment: Alignment.center,
+                        child: const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.broken_image_rounded, color: Colors.grey, size: 28),
+                            SizedBox(height: 4),
+                            Text('Corrupted Image', style: TextStyle(color: Colors.grey, fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                    )
+                  : Container(
+                      width: double.infinity,
+                      height: double.infinity,
+                      alignment: Alignment.center,
+                      child: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.image_not_supported_outlined, color: Colors.grey, size: 28),
+                          SizedBox(height: 4),
+                          Text(
+                            'Missing on Device • Tap X to remove',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
             ),
           ),
           Padding(
