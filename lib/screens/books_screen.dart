@@ -2451,7 +2451,7 @@ class _BooksScreenState extends State<BooksScreen> {
   }
 
   // ===========================================================================
-  // GOOGLE DRIVE CLOUD SYNC (WITH FULL IMAGE & CONTACT RESTORE)
+  // GOOGLE DRIVE CLOUD SYNC (WITH ZERO-DATA-LOSS SAFETY & MANAGE BACKUPS)
   // ===========================================================================
   void _showProgressModal(String label) {
     showDialog(
@@ -2498,54 +2498,61 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
-  Future<GoogleSignInAccount?> _attemptSignInWithClient(
-    GoogleSignIn client, {
-    required bool switchAccount,
-    required String clientLabel,
-  }) async {
-    if (switchAccount) {
-      try {
-        await client.signOut();
-      } catch (signOutErr) {
-        AppLogger.instance.log('[$clientLabel] Ignored signOut notice: $signOutErr', tag: 'WARN');
-      }
-    }
-    GoogleSignInAccount? user = client.currentUser;
-    if (user == null && !switchAccount) {
-      try {
-        user = await client.signInSilently();
-      } catch (silentErr) {
-        AppLogger.instance.log('[$clientLabel] signInSilently skipped: $silentErr', tag: 'WARN');
-        user = null;
-      }
-    }
-    user ??= await client.signIn();
-    return user;
-  }
-
+  /// Progressive 2-Stage OAuth Sign-In with robust custom ROM & older GApps fallback
   Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
     final certInfo = await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
     final livePkg = certInfo['packageName'] ?? 'com.chandsy.fintrax';
     final liveSha1 = certInfo['sha1'] ?? 'UNKNOWN';
 
+    // Helper to execute sign-in safely on a given client instance
+    Future<GoogleSignInAccount?> executeClient(GoogleSignIn client, String label) async {
+      if (switchAccount) {
+        try {
+          await client.signOut();
+        } catch (_) {}
+        try {
+          await client.disconnect();
+        } catch (_) {}
+      }
+      GoogleSignInAccount? user = client.currentUser;
+      if (user == null && !switchAccount) {
+        try {
+          user = await client.signInSilently();
+        } catch (_) {
+          user = null;
+        }
+      }
+      if (user == null) {
+        try {
+          user = await client.signIn();
+        } catch (signInErr) {
+          AppLogger.instance.log('[$label] signIn() failed: $signInErr', tag: 'WARN');
+          // Progressive 2-Stage Fallback for older custom ROMs (like Mi A1 / 12500 bypass):
+          // If the initial sign-in with scopes failed, try signing in with ZERO scopes (basic profile only)
+          // and request the drive scope afterwards via requestScopes()!
+          try {
+            AppLogger.instance.log('[$label] Attempting 2-Stage basic sign-in fallback...', tag: 'INFO');
+            final GoogleSignIn basicClient = GoogleSignIn(scopes: []);
+            user = await basicClient.signIn();
+            if (user != null) {
+              await basicClient.requestScopes([_driveAppDataScope]);
+            }
+          } catch (stage2Err) {
+            AppLogger.instance.log('[$label] 2-stage fallback also failed: $stage2Err', tag: 'ERROR');
+            rethrow;
+          }
+        }
+      }
+      return user;
+    }
+
     try {
       GoogleSignInAccount? user;
       try {
-        user = await _attemptSignInWithClient(
-          _googleAuth,
-          switchAccount: switchAccount,
-          clientLabel: 'PRIMARY_WEB_CLIENT',
-        );
-      } on PlatformException catch (primaryErr) {
-        AppLogger.instance.log(
-          'Primary GoogleSignIn failed (${primaryErr.code}: ${primaryErr.message}). Retrying with fallback client...',
-          tag: 'WARN',
-        );
-        user = await _attemptSignInWithClient(
-          _googleAuthFallback,
-          switchAccount: switchAccount,
-          clientLabel: 'FALLBACK_CLIENT',
-        );
+        user = await executeClient(_googleAuth, 'PRIMARY_CLIENT');
+      } catch (primaryErr) {
+        AppLogger.instance.log('Primary client failed completely. Trying fallback client...', tag: 'WARN');
+        user = await executeClient(_googleAuthFallback, 'FALLBACK_CLIENT');
       }
 
       if (user == null) {
@@ -2641,7 +2648,7 @@ class _BooksScreenState extends State<BooksScreen> {
     return utf8.decode(resp.bodyBytes);
   }
 
-  /// Shows the Restore confirmation modal (used both when connecting an account and when tapping Restore)
+  /// Restore confirmation modal with zero-data-loss preview
   Future<bool> _promptRestoreFoundBackup(
     GoogleSignInAccount user,
     String rawJson,
@@ -2700,8 +2707,279 @@ class _BooksScreenState extends State<BooksScreen> {
     return false;
   }
 
+  /// ZERO-DATA-LOSS SAFETY: Intercepts accidental overwrites if local app has 0 books and cloud has data
+  Future<bool> _guardZeroDataLossBeforeBackup(Map<String, String> headers, ThemeProvider prefs) async {
+    try {
+      final localBooks = await DatabaseHelper.instance.getBooksWithBalances();
+      final cloudJson = await _pullBackupFromDrive(headers);
+
+      if (cloudJson != null && cloudJson.isNotEmpty) {
+        int cloudBooksCount = 0;
+        try {
+          final parsed = jsonDecode(cloudJson) as Map<String, dynamic>;
+          cloudBooksCount = ((parsed['books'] as List<dynamic>?) ?? []).length;
+        } catch (_) {}
+
+        // If local app has 0 books, but cloud has existing backup data, DO NOT let user overwrite blindly!
+        if (localBooks.isEmpty && cloudBooksCount > 0) {
+          if (!mounted) return false;
+          final bool? chooseRestore = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: AppConstants.goldAccent),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('Cloud Backup Exists!', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17))),
+                ],
+              ),
+              content: Text(
+                'Your local app currently has 0 books, but we found a cloud backup containing $cloudBooksCount book(s) on Google Drive.\n\nIf you tap "Backup Now", you will overwrite your cloud records with an empty state!\n\nWould you like to Restore your existing cloud backup instead?',
+                style: const TextStyle(fontSize: 13.5, height: 1.45),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false), // Proceed to backup anyway
+                  child: const Text('Overwrite Cloud', style: TextStyle(color: AppConstants.expenseRed)),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true), // Restore instead
+                  child: const Text('Restore Cloud Backup'),
+                ),
+              ],
+            ),
+          );
+
+          if (chooseRestore == true) {
+            final user = _googleAuth.currentUser ?? _googleAuthFallback.currentUser;
+            if (user != null) {
+              await _promptRestoreFoundBackup(user, cloudJson, prefs);
+            }
+            return false; // Stop upload
+          }
+        }
+      }
+    } catch (_) {}
+    return true; // Proceed with backup
+  }
+
+  /// Opens the Cloud Backup Data Manager where users can inspect or delete cloud backups
+  Future<void> _openManageCloudDataModal(ThemeProvider prefs) async {
+    HapticFeedback.lightImpact();
+    final user = await _signInForDrive(prefs);
+    if (user == null || !mounted) return;
+
+    _showProgressModal('Connecting to Google Drive...');
+    String? cloudJson;
+    try {
+      final headers = await user.authHeaders;
+      cloudJson = await _pullBackupFromDrive(headers);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) _showErrorModal('Cloud Data Manager Error', e.toString());
+      return;
+    }
+
+    if (!mounted) return;
+
+    int bookCount = 0;
+    int txCount = 0;
+    String backupDate = 'Unknown';
+    List<dynamic> bookNames = [];
+
+    if (cloudJson != null && cloudJson.isNotEmpty) {
+      try {
+        final parsed = jsonDecode(cloudJson) as Map<String, dynamic>;
+        final iso = parsed['exportedAt']?.toString() ?? '';
+        final dt = DateTime.tryParse(iso);
+        if (dt != null) backupDate = AppConstants.formatOrdinalDateTime(dt);
+        final booksList = (parsed['books'] as List<dynamic>?) ?? [];
+        bookCount = booksList.length;
+        bookNames = booksList.map((b) => b['name']?.toString() ?? 'Unnamed Book').toList();
+        txCount = ((parsed['transactions'] as List<dynamic>?) ?? []).length;
+      } catch (_) {}
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? AppConstants.cardDark : AppConstants.cardLight,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Theme.of(context).brightness == Brightness.dark ? AppConstants.borderDark : AppConstants.borderLight),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Manage Cloud Backup', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      onPressed: () => Navigator.pop(sheetCtx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text('Account: ${user.email}', style: TextStyle(fontSize: 12, color: Colors.grey[500])),
+                const SizedBox(height: 14),
+                if (cloudJson == null || cloudJson.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 30),
+                    child: Center(
+                      child: Text('No cloud backup file found on Google Drive.', style: TextStyle(color: Colors.grey[500])),
+                    ),
+                  )
+                else ...[
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Last Cloud Backup: $backupDate', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                        const SizedBox(height: 4),
+                        Text('Stored Contents: $bookCount Book(s), $txCount Transaction(s)', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Books Stored in Cloud:', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                  const SizedBox(height: 6),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: bookNames.length,
+                      itemBuilder: (_, i) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.book_rounded, size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            Text(bookNames[i].toString(), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppConstants.expenseRed,
+                            side: const BorderSide(color: AppConstants.expenseRed),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () async {
+                            HapticFeedback.mediumImpact();
+                            final bool? confirmDelete = await showDialog<bool>(
+                              context: context,
+                              builder: (dCtx) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                title: const Text('Delete Cloud Backup?', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                                content: const Text(
+                                  'This will permanently delete your backup file from Google Drive. Your local device books will remain safe.',
+                                  style: TextStyle(fontSize: 13.5, height: 1.4),
+                                ),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(dCtx, false), child: const Text('Cancel')),
+                                  FilledButton(
+                                    style: FilledButton.styleFrom(backgroundColor: AppConstants.expenseRed, foregroundColor: Colors.white),
+                                    onPressed: () => Navigator.pop(dCtx, true),
+                                    child: const Text('Delete from Drive'),
+                                  ),
+                                ],
+                              ),
+                            );
+
+                            if (confirmDelete == true && mounted) {
+                              Navigator.pop(sheetCtx);
+                              _showProgressModal('Deleting cloud backup...');
+                              try {
+                                final headers = await user.authHeaders;
+                                final fileId = await _locateBackupFileId(headers);
+                                if (fileId != null) {
+                                  await http.delete(
+                                    Uri.parse('https://www.googleapis.com/drive/v3/files/$fileId'),
+                                    headers: headers,
+                                  );
+                                }
+                                if (mounted) {
+                                  Navigator.pop(context);
+                                  FinTraxBrandHelper.showModernSnackBar(
+                                    context: context,
+                                    message: 'Cloud backup deleted from Google Drive.',
+                                    icon: Icons.delete_sweep_rounded,
+                                    color: AppConstants.expenseRed,
+                                  );
+                                }
+                              } catch (e) {
+                                if (mounted) Navigator.pop(context);
+                                if (mounted) _showErrorModal('Delete Error', e.toString());
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                          label: const Text('Delete Cloud Backup', style: TextStyle(fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () async {
+                            Navigator.pop(sheetCtx);
+                            if (cloudJson != null) {
+                              await _promptRestoreFoundBackup(user, cloudJson, prefs);
+                            }
+                          },
+                          child: const Text('Restore Cloud', style: TextStyle(fontWeight: FontWeight.w700)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _onSwitchDriveAccount(ThemeProvider prefs) async {
     HapticFeedback.lightImpact();
+    // Forces account chooser popup to always display every time "Connect" or "Switch" is tapped
     final user = await _signInForDrive(prefs, switchAccount: true);
     if (user == null || !mounted) return;
 
@@ -2747,9 +3025,12 @@ class _BooksScreenState extends State<BooksScreen> {
     final user = await _signInForDrive(prefs);
     if (user == null || !mounted) return;
 
+    final headers = await user.authHeaders;
+    final bool proceed = await _guardZeroDataLossBeforeBackup(headers, prefs);
+    if (!proceed || !mounted) return;
+
     _showProgressModal('Uploading backup & images to Google Drive...');
     try {
-      final headers = await user.authHeaders;
       final rawPayload = await DatabaseHelper.instance.exportDatabaseJson();
       final payload = await FinTraxBrandHelper.enrichBackupJsonWithImagesAndContacts(rawPayload);
       final fileId = await _pushBackupToDrive(headers, payload);
@@ -3500,6 +3781,15 @@ class _BooksScreenState extends State<BooksScreen> {
                 ],
               ),
             ),
+            const Divider(height: 1),
+            ListTile(
+              dense: true,
+              leading: Icon(Icons.cloud_sync_outlined, color: scheme.primary, size: 21),
+              title: const Text('Manage Cloud Backup Data', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.5)),
+              subtitle: const Text('Inspect books stored in Drive or delete cloud backup', style: TextStyle(fontSize: 11.5)),
+              trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+              onTap: () => _openManageCloudDataModal(prefs),
+            ),
           ]),
           Container(
             margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
@@ -3605,7 +3895,7 @@ class _BooksScreenState extends State<BooksScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_showOnboarding) {
+    if (_showOnboarding, {
       return WelcomeSetupScreen(
         onFinished: () async {
           setState(() => _showOnboarding = false);
