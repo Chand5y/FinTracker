@@ -19,7 +19,7 @@ class FinTraxBrandHelper {
 
   static const String vicesCategoryName = 'Vices & Addictions';
 
-  /// Modern rounded floating status notification (replaces the old rectangular green bar)
+  /// Modern rounded floating status notification
   static void showModernSnackBar({
     required BuildContext context,
     required String message,
@@ -93,7 +93,7 @@ class FinTraxBrandHelper {
     });
   }
 
-  /// Modern rounded floating 2-second Undo bar (guaranteed to auto-dismiss on HyperOS/Android)
+  /// Modern rounded floating 2-second Undo bar
   static void showModernUndoBar({
     required ScaffoldMessengerState messenger,
     required String message,
@@ -202,7 +202,7 @@ class FinTraxBrandHelper {
     });
   }
 
-  /// Copies picked images into permanent app storage so Android cache cleanup never deletes them
+  /// Copies picked/captured images into permanent app storage so Android cache cleanup never deletes them
   static Future<String> persistPickedImageFile(String sourcePath) async {
     try {
       final srcFile = File(sourcePath);
@@ -338,7 +338,6 @@ class FinTraxBrandHelper {
           }
         }
       } else {
-        // Clean out broken file paths from older backups that did not embed image bytes
         final txRows = await db.query('transactions');
         for (final row in txRows) {
           final txId = row['id'] as int?;
@@ -811,7 +810,6 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
       sender: rawName,
     );
 
-    // Filter out any non-existent broken paths from older restores so new attachments work cleanly
     final rawPaths = FinTraxBrandHelper.parseImagePaths(widget.existingTransaction?.imagePath ?? '');
     _imagePaths = rawPaths;
     _nameController.addListener(_onMerchantNameChanged);
@@ -1354,10 +1352,167 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
     );
   }
 
+  /// Opens a modern sheet allowing the user to either snap a live camera photo or pick from Gallery
   Future<void> _pickImages() async {
     HapticFeedback.selectionClick();
-    // Automatically clean out any missing/corrupted paths before adding new ones
     _imagePaths.removeWhere((p) => !File(p).existsSync());
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scheme = Theme.of(context).colorScheme;
+
+    final String? choice = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: isDark ? AppConstants.cardDark : AppConstants.cardLight,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.withOpacity(0.4), borderRadius: BorderRadius.circular(2)),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Attach Receipt or Image',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Take a live photo of your physical bill or select a screenshot from your gallery',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Material(
+                        color: scheme.primary.withOpacity(isDark ? 0.16 : 0.10),
+                        borderRadius: BorderRadius.circular(16),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => Navigator.pop(sheetCtx, 'camera'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                            child: Column(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary.withOpacity(0.18),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(Icons.camera_alt_rounded, size: 26, color: scheme.primary),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'Take Photo',
+                                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Use Camera',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Material(
+                        color: isDark ? const Color(0xFF1A1D26) : const Color(0xFFF1F5F9),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          side: BorderSide(color: isDark ? AppConstants.borderDark : AppConstants.borderLight),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => Navigator.pop(sheetCtx, 'gallery'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                            child: Column(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: scheme.primary.withOpacity(0.12),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(Icons.photo_library_rounded, size: 26, color: scheme.primary),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'Choose Gallery',
+                                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Screenshots / Photos',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (choice == null || !mounted) return;
+
+    if (choice == 'camera') {
+      try {
+        final XFile? photo = await _picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1440,
+          maxHeight: 1440,
+          imageQuality: 80,
+        );
+        if (photo != null && mounted) {
+          final permanentPath = await FinTraxBrandHelper.persistPickedImageFile(photo.path);
+          if (mounted) {
+            setState(() {
+              if (!_imagePaths.contains(permanentPath)) {
+                _imagePaths.add(permanentPath);
+              }
+            });
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          FinTraxBrandHelper.showModernSnackBar(
+            context: context,
+            message: 'Unable to open camera. Please allow Camera permission.',
+            icon: Icons.camera_alt_outlined,
+            color: AppConstants.expenseRed,
+          );
+        }
+      }
+      return;
+    }
 
     try {
       final List<XFile> pickedList = await _picker.pickMultiImage(
@@ -1971,12 +2126,12 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                   child: Row(
                     children: [
-                      Icon(Icons.add_photo_alternate_outlined, size: 20, color: Theme.of(context).colorScheme.primary),
+                      Icon(Icons.add_a_photo_outlined, size: 20, color: Theme.of(context).colorScheme.primary),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
                           _imagePaths.isEmpty
-                              ? 'Attach Receipt or Screenshot(s)'
+                              ? 'Attach Receipt (Camera or Gallery)'
                               : 'Add More Images (${_imagePaths.length} attached)',
                           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
@@ -1992,7 +2147,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
               _buildAdaptiveImagesSection(isDark),
               const SizedBox(height: 6),
               Text(
-                'Tap any image to view full screen • Tap + above to attach more',
+                'Tap any image to view full screen • Tap + above to take photo or pick gallery',
                 style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                 textAlign: TextAlign.center,
               ),
