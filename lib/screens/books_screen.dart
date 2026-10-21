@@ -785,8 +785,15 @@ class _BooksScreenState extends State<BooksScreen> {
   static const MethodChannel _nativeBridge = MethodChannel('com.chandankumar.fintrack/sms');
   static const String _driveAppDataScope = 'https://www.googleapis.com/auth/drive.appdata';
   static const String _backupFileName = 'fintrax_cloud_backup.json';
+  static const String _webServerClientId =
+      '174741660325-qh2rr5oid0pd90nhp8ugn6qfqffuvonj.apps.googleusercontent.com';
 
   final GoogleSignIn _googleAuth = GoogleSignIn(
+    scopes: <String>[_driveAppDataScope],
+    serverClientId: _webServerClientId,
+  );
+
+  final GoogleSignIn _googleAuthFallback = GoogleSignIn(
     scopes: <String>[_driveAppDataScope],
   );
 
@@ -956,7 +963,12 @@ class _BooksScreenState extends State<BooksScreen> {
     if (prefs.lastAutoBackupDay == today) return;
 
     try {
-      final account = await _googleAuth.signInSilently();
+      GoogleSignInAccount? account;
+      try {
+        account = await _googleAuth.signInSilently();
+      } catch (_) {
+        account = await _googleAuthFallback.signInSilently();
+      }
       if (account == null) return;
       final headers = await account.authHeaders;
       final rawPayload = await DatabaseHelper.instance.exportDatabaseJson();
@@ -2486,30 +2498,55 @@ class _BooksScreenState extends State<BooksScreen> {
     );
   }
 
+  Future<GoogleSignInAccount?> _attemptSignInWithClient(
+    GoogleSignIn client, {
+    required bool switchAccount,
+    required String clientLabel,
+  }) async {
+    if (switchAccount) {
+      try {
+        await client.signOut();
+      } catch (signOutErr) {
+        AppLogger.instance.log('[$clientLabel] Ignored signOut notice: $signOutErr', tag: 'WARN');
+      }
+    }
+    GoogleSignInAccount? user = client.currentUser;
+    if (user == null && !switchAccount) {
+      try {
+        user = await client.signInSilently();
+      } catch (silentErr) {
+        AppLogger.instance.log('[$clientLabel] signInSilently skipped: $silentErr', tag: 'WARN');
+        user = null;
+      }
+    }
+    user ??= await client.signIn();
+    return user;
+  }
+
   Future<GoogleSignInAccount?> _signInForDrive(ThemeProvider prefs, {bool switchAccount = false}) async {
     final certInfo = await AppLogger.instance.logRuntimeEnvironment(_googleAuth, prefs);
     final livePkg = certInfo['packageName'] ?? 'com.chandsy.fintrax';
     final liveSha1 = certInfo['sha1'] ?? 'UNKNOWN';
 
     try {
-      if (switchAccount) {
-        try {
-          await _googleAuth.signOut();
-        } catch (signOutErr) {
-          AppLogger.instance.log('Ignored signOut notice on fresh device: $signOutErr', tag: 'WARN');
-        }
+      GoogleSignInAccount? user;
+      try {
+        user = await _attemptSignInWithClient(
+          _googleAuth,
+          switchAccount: switchAccount,
+          clientLabel: 'PRIMARY_WEB_CLIENT',
+        );
+      } on PlatformException catch (primaryErr) {
+        AppLogger.instance.log(
+          'Primary GoogleSignIn failed (${primaryErr.code}: ${primaryErr.message}). Retrying with fallback client...',
+          tag: 'WARN',
+        );
+        user = await _attemptSignInWithClient(
+          _googleAuthFallback,
+          switchAccount: switchAccount,
+          clientLabel: 'FALLBACK_CLIENT',
+        );
       }
-      GoogleSignInAccount? user = _googleAuth.currentUser;
-      if (user == null && !switchAccount) {
-        try {
-          user = await _googleAuth.signInSilently();
-        } catch (silentErr) {
-          AppLogger.instance.log('signInSilently skipped, opening picker: $silentErr', tag: 'WARN');
-          user = null;
-        }
-      }
-      user ??= await _googleAuth.signIn();
-
 
       if (user == null) {
         AppLogger.instance.log('User cancelled account picker.', tag: 'WARN');
