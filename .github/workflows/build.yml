@@ -103,7 +103,7 @@ jobs:
           echo "Using pre-installed NDK: $INSTALLED_NDK"
           sed -i "s/flutter.ndkVersion/\"$INSTALLED_NDK\"/g" android/app/build.gradle*
           sed -i 's/android:label="fintrax"/android:label="FinTrax"/g' android/app/src/main/AndroidManifest.xml
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.CAMERA"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.READ_CONTACTS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="false" android:fullBackupOnly="false"/' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <uses-permission android:name="android.permission.CAMERA"\/>\n    <uses-permission android:name="android.permission.GET_ACCOUNTS"\/>\n    <uses-permission android:name="android.permission.READ_SMS"\/>\n    <uses-permission android:name="android.permission.READ_CONTACTS"\/>\n    <uses-permission android:name="android.permission.USE_BIOMETRIC"\/>\n    <uses-permission android:name="android.permission.USE_FINGERPRINT"\/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"\/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"\/>\n    <application android:allowBackup="false" android:fullBackupOnly="false"/' android/app/src/main/AndroidManifest.xml
           sed -i 's/<\/application>/    <receiver android:name=".ReminderReceiver" android:exported="false"\/>\n    <\/application>/' android/app/src/main/AndroidManifest.xml
 
           if [ -f "android/app/build.gradle.kts" ]; then
@@ -292,7 +292,7 @@ jobs:
                   } else {
                       @Suppress("DEPRECATION")
                       android.app.Notification.Builder(context)
-                  }
+                      }
 
                   builder.setSmallIcon(android.R.drawable.ic_dialog_info)
                       .setContentTitle(title)
@@ -432,6 +432,8 @@ jobs:
           package com.chandsy.fintrax
 
           import android.Manifest
+          import android.accounts.Account
+          import android.accounts.AccountManager
           import android.app.Activity
           import android.app.KeyguardManager
           import android.content.Context
@@ -453,6 +455,8 @@ jobs:
               private var pendingPdfResult: MethodChannel.Result? = null
               private var pendingPdfBytes: ByteArray? = null
               private var pendingContactResult: MethodChannel.Result? = null
+              private var pendingNativeDriveResult: MethodChannel.Result? = null
+              private var pendingNativeDriveEmail: String = ""
               private var pendingInsightOpen: Boolean = false
 
               private fun getInstalledSha1(): String {
@@ -477,6 +481,54 @@ jobs:
                   } catch (e: Exception) {
                       "ERROR: ${e.message}"
                   }
+              }
+
+              private fun requestGoogleAuthTokenAsync(email: String) {
+                  Thread {
+                      try {
+                          val account = Account(email, "com.google")
+                          val scope = "oauth2:https://www.googleapis.com/auth/drive.appdata"
+                          val utilClass = Class.forName("com.google.android.gms.auth.GoogleAuthUtil")
+                          val getTokenMethod = utilClass.getMethod(
+                              "getToken",
+                              Context::class.java,
+                              Account::class.java,
+                              String::class.java
+                          )
+                          val token = getTokenMethod.invoke(null, applicationContext, account, scope) as? String ?: ""
+                          runOnUiThread {
+                              pendingNativeDriveResult?.success(mapOf("email" to email, "token" to token))
+                              pendingNativeDriveResult = null
+                          }
+                      } catch (e: java.lang.reflect.InvocationTargetException) {
+                          val cause = e.targetException ?: e
+                          var recoverIntent: Intent? = null
+                          try {
+                              val m = cause.javaClass.getMethod("getIntent")
+                              recoverIntent = m.invoke(cause) as? Intent
+                          } catch (_: Exception) {}
+                          if (recoverIntent != null) {
+                              runOnUiThread {
+                                  try {
+                                      startActivityForResult(recoverIntent, 1011)
+                                  } catch (ex: Exception) {
+                                      pendingNativeDriveResult?.success(mapOf("error" to (ex.message ?: "Consent activity failed")))
+                                      pendingNativeDriveResult = null
+                                  }
+                              }
+                          } else {
+                              runOnUiThread {
+                                  pendingNativeDriveResult?.success(mapOf("error" to (cause.message ?: cause.toString())))
+                                  pendingNativeDriveResult = null
+                              }
+                          }
+                      } catch (e: Exception) {
+                          runOnUiThread {
+                              pendingNativeDriveResult?.success(mapOf("error" to (e.message ?: e.toString())))
+                              pendingNativeDriveResult = null
+                          }
+                      }
+                  }.start()
               }
 
               override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -512,6 +564,46 @@ jobs:
                                   "packageName" to packageName,
                                   "sha1" to getInstalledSha1()
                               ))
+                          }
+                          "nativeDriveAuth" -> {
+                              val switchAccount = call.argument<Boolean>("switchAccount") ?: false
+                              val savedEmail = call.argument<String>("savedEmail") ?: ""
+                              pendingNativeDriveResult = result
+                              if (!switchAccount && savedEmail.isNotEmpty()) {
+                                  pendingNativeDriveEmail = savedEmail
+                                  requestGoogleAuthTokenAsync(savedEmail)
+                              } else {
+                                  try {
+                                      @Suppress("DEPRECATION")
+                                      val pickerIntent = AccountManager.newChooseAccountIntent(
+                                          null,
+                                          null,
+                                          arrayOf("com.google"),
+                                          false,
+                                          null,
+                                          null,
+                                          null,
+                                          null
+                                      )
+                                      startActivityForResult(pickerIntent, 1010)
+                                  } catch (e: Exception) {
+                                      pendingNativeDriveResult = null
+                                      result.success(mapOf("error" to (e.message ?: "Account picker unavailable")))
+                                  }
+                              }
+                          }
+                          "clearNativeDriveToken" -> {
+                              val token = call.argument<String>("token") ?: ""
+                              if (token.isNotEmpty()) {
+                                  Thread {
+                                      try {
+                                          val utilClass = Class.forName("com.google.android.gms.auth.GoogleAuthUtil")
+                                          val clearMethod = utilClass.getMethod("clearToken", Context::class.java, String::class.java)
+                                          clearMethod.invoke(null, applicationContext, token)
+                                      } catch (_: Exception) {}
+                                  }.start()
+                              }
+                              result.success(true)
                           }
                           "consumeMonthlyInsightIntent" -> {
                               val fromLaunch = intent?.getBooleanExtra("open_monthly_insights", false) == true
@@ -561,19 +653,22 @@ jobs:
                                       null,
                                       "date DESC"
                                   )
+                                  val bankHintRegex = Regex("(rs\\.?|inr|₹|debited|credited|spent|paid|upi|a/c|acct|bank|card|sent|received|withdrawn|trf)", RegexOption.IGNORE_CASE)
                                   cursor?.use {
                                       val idIdx = it.getColumnIndex("_id")
                                       val addrIdx = it.getColumnIndex("address")
                                       val bodyIdx = it.getColumnIndex("body")
                                       val dateIdx = it.getColumnIndex("date")
-                                      var count = 0
-                                      while (it.moveToNext() && count < 120) {
-                                          val id = if (idIdx >= 0) it.getString(idIdx) ?: "" else ""
-                                          val addr = if (addrIdx >= 0) it.getString(addrIdx) ?: "" else ""
+                                      var scanned = 0
+                                      while (it.moveToNext() && scanned < 3000 && smsList.size < 400) {
+                                          scanned++
                                           val body = if (bodyIdx >= 0) it.getString(bodyIdx) ?: "" else ""
-                                          val date = if (dateIdx >= 0) it.getLong(dateIdx) else 0L
-                                          smsList.add(mapOf("id" to id, "address" to addr, "body" to body, "date" to date))
-                                          count++
+                                          if (body.isNotEmpty() && bankHintRegex.containsMatchIn(body)) {
+                                              val id = if (idIdx >= 0) it.getString(idIdx) ?: "" else ""
+                                              val addr = if (addrIdx >= 0) it.getString(addrIdx) ?: "" else ""
+                                              val date = if (dateIdx >= 0) it.getLong(dateIdx) else 0L
+                                              smsList.add(mapOf("id" to id, "address" to addr, "body" to body, "date" to date))
+                                          }
                                       }
                                   }
                                   result.success(smsList)
@@ -746,6 +841,29 @@ jobs:
                               pendingContactResult?.success(null)
                           }
                           pendingContactResult = null
+                      }
+                      1010 -> {
+                          if (resultCode == Activity.RESULT_OK && data != null) {
+                              val pickedEmail = data.getStringExtra(AccountManager.KEY_ACCOUNT_NAME) ?: ""
+                              if (pickedEmail.isNotEmpty()) {
+                                  pendingNativeDriveEmail = pickedEmail
+                                  requestGoogleAuthTokenAsync(pickedEmail)
+                              } else {
+                                  pendingNativeDriveResult?.success(null)
+                                  pendingNativeDriveResult = null
+                              }
+                          } else {
+                              pendingNativeDriveResult?.success(null)
+                              pendingNativeDriveResult = null
+                          }
+                      }
+                      1011 -> {
+                          if (resultCode == Activity.RESULT_OK && pendingNativeDriveEmail.isNotEmpty()) {
+                              requestGoogleAuthTokenAsync(pendingNativeDriveEmail)
+                          } else {
+                              pendingNativeDriveResult?.success(null)
+                              pendingNativeDriveResult = null
+                          }
                       }
                   }
               }
@@ -1059,4 +1177,3 @@ jobs:
           path: release-apks/*.apk
           if-no-files-found: error
           retention-days: 30
-
